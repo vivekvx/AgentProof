@@ -1,0 +1,87 @@
+services:
+  postgres:
+    image: postgres:16.14-alpine
+    environment:
+      POSTGRES_USER: agentproof
+      POSTGRES_PASSWORD: agentproof
+      POSTGRES_DB: agentproof
+    ports: ["127.0.0.1:${AGENTPROOF_DB_PORT:-55432}:5432"]
+    volumes:
+      - postgres:/var/lib/postgresql/data
+      - ./infra/init-test-db.sql:/docker-entrypoint-initdb.d/test.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agentproof"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+  temporal-volume:
+    image: temporalio/temporal:1.9.1
+    user: "0:0"
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["mkdir -p /data && chown 1000:1000 /data"]
+    volumes: ["temporal:/data"]
+  temporal:
+    depends_on:
+      temporal-volume: {condition: service_completed_successfully}
+    image: temporalio/temporal:1.9.1
+    command: ["server", "start-dev", "--ip", "0.0.0.0", "--db-filename", "/data/temporal.db"]
+    ports: ["127.0.0.1:${AGENTPROOF_TEMPORAL_PORT:-7233}:7233", "127.0.0.1:${AGENTPROOF_TEMPORAL_UI_PORT:-8233}:8233"]
+    volumes: ["temporal:/data"]
+    healthcheck:
+      test: ["CMD", "temporal", "operator", "cluster", "health", "--address", "localhost:7233"]
+      interval: 2s
+      timeout: 5s
+      retries: 60
+  jaeger:
+    image: jaegertracing/all-in-one:1.76.0
+    environment: {COLLECTOR_OTLP_ENABLED: "true"}
+    ports: ["127.0.0.1:${AGENTPROOF_JAEGER_PORT:-16686}:16686", "127.0.0.1:${AGENTPROOF_OTLP_PORT:-4318}:4318"]
+  api:
+    build: {context: ., dockerfile: Dockerfile.dev, target: api}
+    environment: &app_env
+      DATABASE_URL: postgresql://agentproof:agentproof@postgres:5432/agentproof
+      TEMPORAL_ADDRESS: temporal:7233
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
+    ports: ["127.0.0.1:${AGENTPROOF_API_PORT:-8080}:8080"]
+    depends_on:
+      postgres: {condition: service_healthy}
+      temporal: {condition: service_healthy}
+      jaeger: {condition: service_started}
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/healthz"]
+      interval: 2s
+      timeout: 5s
+      retries: 60
+  worker:
+    build: {context: ., dockerfile: Dockerfile.dev, target: worker}
+    environment: *app_env
+    depends_on:
+      api: {condition: service_healthy}
+  web:
+    build: {context: ., dockerfile: Dockerfile.dev, target: web}
+    ports: ["127.0.0.1:${AGENTPROOF_WEB_PORT:-5173}:5173"]
+    depends_on:
+      api: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:5173').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 2s
+      timeout: 5s
+      retries: 60
+  verify:
+    profiles: [verification]
+    build: {context: ., dockerfile: Dockerfile.dev, target: verify}
+    environment:
+      <<: *app_env
+      TEST_DATABASE_URL: postgresql://agentproof:agentproof@postgres:5432/agentproof_test
+      TEST_TEMPORAL_ADDRESS: temporal:7233
+      E2E_BASE_URL: http://web:5173
+      JAEGER_QUERY_URL: http://jaeger:16686
+      EVIDENCE_DIR: /evidence
+    volumes: ["./.local/verification:/evidence"]
+    depends_on:
+      web: {condition: service_healthy}
+      worker: {condition: service_started}
+
+volumes:
+  postgres:
+  temporal:
