@@ -1,0 +1,194 @@
+{
+  "schema_version": 1,
+  "scope": "T03: trusted in-process harness with untrusted model tool names, arguments and public context; 32 existing scenario-v4 cases, dataset v5, evaluator v4.",
+  "trust": {
+    "agent_supplies": [
+      "tool name",
+      "tool arguments",
+      "declared final resolution (untrusted; graded against state)"
+    ],
+    "harness_supplies": [
+      "trial identity",
+      "private fixture and permissions",
+      "immutable consent",
+      "sequence and operation key",
+      "authorized/arguments_valid flags",
+      "fault delivery",
+      "response",
+      "state and effects",
+      "receipt chain",
+      "terminal result and provenance"
+    ],
+    "read_policy": "get_order permission is a capability for the single synthetic trial fixture, including cs-008. request.customer_id is a business actor, not an authenticated principal. All mutation and approval tools require fixture customer ownership.",
+    "excluded": [
+      "hostile code executing inside the trusted Python process",
+      "database administrator rewriting both evidence and witnesses",
+      "production identity and customer confidentiality",
+      "external-agent transport; T12/T15"
+    ],
+    "historical_policy": "Published assets and evaluator implementations remain unchanged. Never reinterpret or rewrite frozen results. New platform rejections are outside the frozen execution digest."
+  },
+  "evidence_command": "TEST_DATABASE_URL=<dedicated-test-database> EVIDENCE_DIR=<outside-repository-directory> uv run --project engine --frozen pytest -q engine/tests/test_broker_security.py",
+  "evidence_format": "EVIDENCE_DIR/t03/*.json contains observed before/after state, complete event/effect/receipt snapshots and counts. Tests with no export pattern assert their bounded journal or witness directly in the dedicated database.",
+  "invariants": [
+    {
+      "id": "stored-authority",
+      "invariant": "Reject caller changes to fixture, request, permissions or fault; no state or evidence changes.",
+      "test": "engine/tests/test_broker_security.py::test_broker_refuses_foreign_or_modified_authority",
+      "evidence_patterns": [
+        "modified-authority-*"
+      ],
+      "trusted_producer": "control plane trial snapshot"
+    },
+    {
+      "id": "copied-context",
+      "invariant": "Public context, tool arguments and response aliases cannot change private authority or persisted state.",
+      "test": "engine/tests/test_broker_security.py::test_private_authority_and_response_aliases_are_copied",
+      "evidence_patterns": [
+        "authority-and-response-copy"
+      ],
+      "trusted_producer": "broker private copy"
+    },
+    {
+      "id": "public-context",
+      "invariant": "Context changes cannot grant approval or expose assertions; policy FAIL, zero effects.",
+      "test": "engine/tests/test_broker_security.py::test_context_attack_does_not_grant_authority_or_private_evidence",
+      "evidence_patterns": [
+        "public-context-attack"
+      ],
+      "trusted_producer": "execution public context and broker"
+    },
+    {
+      "id": "trial-isolation",
+      "invariant": "Only the bound trial is addressable; forged trial, operation and effect fields produce bounded invalid events, zero effects.",
+      "test": "engine/tests/test_broker_security.py::test_cross_trial_identity_and_forged_authority_fields_fail",
+      "evidence_patterns": [
+        "cross-trial-*"
+      ],
+      "trusted_producer": "broker bound trial identity"
+    },
+    {
+      "id": "customer-policy",
+      "invariant": "Declared read capability grants the synthetic fixture; all mutation/approval calls require customer ownership.",
+      "test": "engine/tests/test_broker_security.py::test_explicit_synthetic_read_grant_and_customer_write_boundary",
+      "evidence_patterns": [
+        "cross-customer-*",
+        "synthetic-read-and-cross-customer-writes"
+      ],
+      "trusted_producer": "scenario permissions and broker"
+    },
+    {
+      "id": "read-denial",
+      "invariant": "Missing get_order permission never discloses fixture contents.",
+      "test": "engine/tests/test_broker_security.py::test_missing_read_permission_never_discloses_fixture",
+      "evidence_patterns": [
+        "missing-read-permission"
+      ],
+      "trusted_producer": "broker authorization"
+    },
+    {
+      "id": "invalid-input",
+      "invariant": "Unknown tools, wrong order, non-JSON, excessive size/depth and forged consent are logged with bounded content; zero effects.",
+      "test": "engine/tests/test_broker_security.py::test_malformed_attempts_have_bounded_safe_evidence",
+      "evidence_patterns": [
+        "invalid-*"
+      ],
+      "trusted_producer": "broker schema validator"
+    },
+    {
+      "id": "approval",
+      "invariant": "Only immutable harness consent grants approval; mutation before approval has zero effects.",
+      "test": "engine/tests/test_broker_security.py::test_approval_comes_from_immutable_harness_request",
+      "evidence_patterns": [
+        "approval-bypass-*",
+        "approval-*"
+      ],
+      "trusted_producer": "stored request and broker approval tool"
+    },
+    {
+      "id": "replay-and-intent",
+      "invariant": "Identical operation replays once; changed arguments fail; two legitimate 1250-cent installments use two keys and total 2500 cents.",
+      "test": "engine/tests/test_broker_security.py::test_replay_identity_and_distinct_refund_installments",
+      "evidence_patterns": [
+        "identical-replay",
+        "mismatched-replay",
+        "replay-and-distinct-installments"
+      ],
+      "trusted_producer": "broker sequence and database unique keys"
+    },
+    {
+      "id": "integrity",
+      "invariant": "Missing or changed events, effects, receipts or state fence both replay and next operation without more effects.",
+      "test": "engine/tests/test_broker_security.py::test_corruption_fences_replay_and_further_effects",
+      "evidence_patterns": [
+        "corruption-*"
+      ],
+      "trusted_producer": "transactional broker receipts and chained head"
+    },
+    {
+      "id": "tampered-approval",
+      "invariant": "A changed state approval flag cannot authorize the next mutation.",
+      "test": "engine/tests/test_broker_security.py::test_tampered_approval_cannot_enable_the_next_mutation",
+      "evidence_patterns": [
+        "tampered-approval"
+      ],
+      "trusted_producer": "broker evidence preflight"
+    },
+    {
+      "id": "mandatory-witness",
+      "invariant": "A caller cannot disable evaluator v4 receipts.",
+      "test": "engine/tests/test_broker_security.py::test_witness_cannot_be_disabled_by_caller",
+      "evidence_patterns": [],
+      "trusted_producer": "stored evaluator reference"
+    },
+    {
+      "id": "terminal",
+      "invariant": "Completed and cancelled trials reject calls without changing execution evidence or state.",
+      "test": "engine/tests/test_broker_security.py::test_terminal_fence_preserves_state_and_evidence",
+      "evidence_patterns": [
+        "terminal-*"
+      ],
+      "trusted_producer": "broker terminal lock and database result"
+    },
+    {
+      "id": "terminal-database",
+      "invariant": "Database guards reject terminal event, effect, receipt and head updates.",
+      "test": "engine/tests/test_broker_security.py::test_database_terminal_fences_cover_all_execution_journals",
+      "evidence_patterns": [
+        "database-terminal-*"
+      ],
+      "trusted_producer": "PostgreSQL terminal triggers"
+    },
+    {
+      "id": "rejection-journal",
+      "invariant": "Late and mismatched calls append bounded platform audit records; frozen result and execution digest remain unchanged.",
+      "test": "engine/tests/test_broker_security.py::test_rejected_replay_and_terminal_attempts_keep_separate_bounded_audit",
+      "evidence_patterns": [],
+      "trusted_producer": "broker platform rejection journal"
+    },
+    {
+      "id": "atomicity",
+      "invariant": "Failure during witness write rolls back state, effect, event and receipt; a fresh retry commits one effect.",
+      "test": "engine/tests/test_broker_security.py::test_transaction_failure_does_not_leave_partial_effect_or_event",
+      "evidence_patterns": [
+        "transaction-rollback",
+        "transaction-recovery"
+      ],
+      "trusted_producer": "PostgreSQL transaction and broker"
+    },
+    {
+      "id": "database-identity",
+      "invariant": "Indexed event and receipt sequences and operation keys must match their witnessed JSON payloads before replay or dispatch. Conflicts are harness failures with no effects.",
+      "test": "engine/tests/test_broker_security.py::test_database_identity_must_match_witness_payload",
+      "evidence_patterns": [
+        "database-identity-*"
+      ],
+      "trusted_producer": "broker identity preflight and PostgreSQL index columns"
+    }
+  ],
+  "preserved_guarantees": [
+    "engine/tests/test_scenario_audit.py: all 32 references, 39 alternatives and negative controls",
+    "engine/tests/test_harness_validation.py: independent finite oracle, critical safety failures before provider errors, corrupted/incomplete evidence and real worker interruption",
+    "engine/tests/test_harness_validation.py::test_corrupted_persisted_event_is_a_harness_failure now checks earlier broker detection and evaluator finalization; it still requires INDETERMINATE and receipt_integrity failure"
+  ]
+}
