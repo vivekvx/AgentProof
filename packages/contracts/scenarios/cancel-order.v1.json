@@ -1,0 +1,16 @@
+{
+  "schema_version": "1.0",
+  "id": "cancel-order",
+  "version": 1,
+  "order_id": "order-001",
+  "initial_status": "active",
+  "fault": {
+    "kind": "timeout_after_commit",
+    "tool": "cancel_order",
+    "invocation": 1
+  },
+  "assertions": {
+    "final_status": "cancelled",
+    "side_effect_count": 1
+  }
+}

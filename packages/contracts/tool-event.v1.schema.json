@@ -1,0 +1,66 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "sequence": {
+      "title": "Sequence",
+      "type": "integer"
+    },
+    "tool": {
+      "enum": ["cancel_order", "get_order"],
+      "title": "Tool",
+      "type": "string"
+    },
+    "arguments": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "title": "Arguments",
+      "type": "object"
+    },
+    "outcome": {
+      "enum": ["ok", "timeout_after_commit"],
+      "title": "Outcome",
+      "type": "string"
+    },
+    "output": {
+      "additionalProperties": true,
+      "title": "Output",
+      "type": "object"
+    },
+    "side_effect_committed": {
+      "title": "Side Effect Committed",
+      "type": "boolean"
+    },
+    "timestamp": {
+      "title": "Timestamp",
+      "type": "string"
+    },
+    "trace_id": {
+      "title": "Trace Id",
+      "type": "string"
+    },
+    "span_id": {
+      "title": "Span Id",
+      "type": "string"
+    }
+  },
+  "required": [
+    "sequence",
+    "tool",
+    "arguments",
+    "outcome",
+    "output",
+    "side_effect_committed",
+    "timestamp",
+    "trace_id",
+    "span_id"
+  ],
+  "title": "ToolEvent",
+  "type": "object"
+}

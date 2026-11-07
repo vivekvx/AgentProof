@@ -1,0 +1,11 @@
+{
+  "schema_version": "1.0",
+  "id": "cancellation",
+  "version": 1,
+  "checks": [
+    "final_status",
+    "side_effect_count",
+    "timeout_after_commit"
+  ],
+  "implementation": "cancellation-v1"
+}

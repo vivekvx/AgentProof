@@ -1,0 +1,130 @@
+{
+  "$defs": {
+    "Check": {
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "passed": {
+          "title": "Passed",
+          "type": "boolean"
+        },
+        "expected": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "integer"
+            },
+            {
+              "type": "boolean"
+            }
+          ],
+          "title": "Expected"
+        },
+        "actual": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "integer"
+            },
+            {
+              "type": "boolean"
+            }
+          ],
+          "title": "Actual"
+        }
+      },
+      "required": ["name", "passed", "expected", "actual"],
+      "title": "Check",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "run_id": {
+      "title": "Run Id",
+      "type": "string"
+    },
+    "status": {
+      "enum": ["passed", "failed", "infrastructure_failed"],
+      "title": "Status",
+      "type": "string"
+    },
+    "failure_kind": {
+      "anyOf": [
+        {
+          "enum": ["agent", "infrastructure"],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Failure Kind"
+    },
+    "checks": {
+      "items": {
+        "$ref": "#/$defs/Check"
+      },
+      "title": "Checks",
+      "type": "array"
+    },
+    "final_state": {
+      "additionalProperties": true,
+      "title": "Final State",
+      "type": "object"
+    },
+    "side_effect_count": {
+      "title": "Side Effect Count",
+      "type": "integer"
+    },
+    "scenario_sha256": {
+      "title": "Scenario Sha256",
+      "type": "string"
+    },
+    "evaluator_sha256": {
+      "title": "Evaluator Sha256",
+      "type": "string"
+    },
+    "trace_id": {
+      "title": "Trace Id",
+      "type": "string"
+    },
+    "error": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Error"
+    }
+  },
+  "required": [
+    "run_id",
+    "status",
+    "checks",
+    "final_state",
+    "side_effect_count",
+    "scenario_sha256",
+    "evaluator_sha256",
+    "trace_id"
+  ],
+  "title": "EvaluationResult",
+  "type": "object"
+}

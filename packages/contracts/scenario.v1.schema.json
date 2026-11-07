@@ -1,0 +1,89 @@
+{
+  "$defs": {
+    "Assertions": {
+      "additionalProperties": false,
+      "properties": {
+        "final_status": {
+          "const": "cancelled",
+          "title": "Final Status",
+          "type": "string"
+        },
+        "side_effect_count": {
+          "const": 1,
+          "title": "Side Effect Count",
+          "type": "integer"
+        }
+      },
+      "required": ["final_status", "side_effect_count"],
+      "title": "Assertions",
+      "type": "object"
+    },
+    "Fault": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "timeout_after_commit",
+          "title": "Kind",
+          "type": "string"
+        },
+        "tool": {
+          "const": "cancel_order",
+          "title": "Tool",
+          "type": "string"
+        },
+        "invocation": {
+          "const": 1,
+          "title": "Invocation",
+          "type": "integer"
+        }
+      },
+      "required": ["kind", "tool", "invocation"],
+      "title": "Fault",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "id": {
+      "const": "cancel-order",
+      "title": "Id",
+      "type": "string"
+    },
+    "version": {
+      "const": 1,
+      "title": "Version",
+      "type": "integer"
+    },
+    "order_id": {
+      "title": "Order Id",
+      "type": "string"
+    },
+    "initial_status": {
+      "const": "active",
+      "title": "Initial Status",
+      "type": "string"
+    },
+    "fault": {
+      "$ref": "#/$defs/Fault"
+    },
+    "assertions": {
+      "$ref": "#/$defs/Assertions"
+    }
+  },
+  "required": [
+    "id",
+    "version",
+    "order_id",
+    "initial_status",
+    "fault",
+    "assertions"
+  ],
+  "title": "Scenario",
+  "type": "object"
+}

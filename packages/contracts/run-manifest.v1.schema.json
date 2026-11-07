@@ -1,0 +1,73 @@
+{
+  "$defs": {
+    "Reference": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "version": {
+          "title": "Version",
+          "type": "integer"
+        },
+        "sha256": {
+          "pattern": "^[a-f0-9]{64}$",
+          "title": "Sha256",
+          "type": "string"
+        },
+        "content": {
+          "additionalProperties": true,
+          "title": "Content",
+          "type": "object"
+        }
+      },
+      "required": ["id", "version", "sha256", "content"],
+      "title": "Reference",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "run_id": {
+      "title": "Run Id",
+      "type": "string"
+    },
+    "agent": {
+      "enum": ["safe", "duplicate"],
+      "title": "Agent",
+      "type": "string"
+    },
+    "agent_version": {
+      "const": "reference-v1",
+      "title": "Agent Version",
+      "type": "string"
+    },
+    "scenario": {
+      "$ref": "#/$defs/Reference"
+    },
+    "evaluator": {
+      "$ref": "#/$defs/Reference"
+    },
+    "traceparent": {
+      "title": "Traceparent",
+      "type": "string"
+    }
+  },
+  "required": [
+    "run_id",
+    "agent",
+    "agent_version",
+    "scenario",
+    "evaluator",
+    "traceparent"
+  ],
+  "title": "Manifest",
+  "type": "object"
+}
