@@ -1,0 +1,76 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "2.0",
+      "default": "2.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "id": {
+      "pattern": "^[a-z][a-z0-9-]{1,63}$",
+      "title": "Id",
+      "type": "string"
+    },
+    "version": {
+      "minimum": 1,
+      "title": "Version",
+      "type": "integer"
+    },
+    "kind": {
+      "enum": [
+        "none",
+        "timeout_before_commit",
+        "timeout_after_commit",
+        "temporary_api_failure",
+        "permanent_api_failure",
+        "malformed_response",
+        "duplicate_tool_request",
+        "delayed_response",
+        "permission_denial"
+      ],
+      "title": "Kind",
+      "type": "string"
+    },
+    "tool": {
+      "enum": [
+        "get_order",
+        "cancel_order",
+        "refund_order",
+        "update_address",
+        "request_approval"
+      ],
+      "title": "Tool",
+      "type": "string"
+    },
+    "trigger": {
+      "default": 1,
+      "maximum": 16,
+      "minimum": 1,
+      "title": "Trigger",
+      "type": "integer"
+    },
+    "count": {
+      "default": 1,
+      "maximum": 3,
+      "minimum": 1,
+      "title": "Count",
+      "type": "integer"
+    },
+    "delay_ms": {
+      "default": 0,
+      "maximum": 2000,
+      "minimum": 0,
+      "title": "Delay Ms",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "id",
+    "version",
+    "kind",
+    "tool"
+  ],
+  "title": "FaultProfile",
+  "type": "object"
+}

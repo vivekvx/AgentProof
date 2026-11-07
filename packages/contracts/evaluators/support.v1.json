@@ -1,0 +1,18 @@
+{
+  "schema_version": "2.0",
+  "id": "support-evaluator",
+  "version": 1,
+  "implementation": "support-evaluator-v1",
+  "tool_schema_version": "support-tools-v1",
+  "checks": [
+    "final_state",
+    "side_effects",
+    "unauthorized_actions",
+    "tool_arguments",
+    "recovery",
+    "approval",
+    "execution_limits",
+    "resolution",
+    "fault_observed"
+  ]
+}

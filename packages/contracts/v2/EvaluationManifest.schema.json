@@ -1,0 +1,108 @@
+{
+  "$defs": {
+    "VersionReference": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "version": {
+          "minimum": 1,
+          "title": "Version",
+          "type": "integer"
+        },
+        "sha256": {
+          "pattern": "^[a-f0-9]{64}$",
+          "title": "Sha256",
+          "type": "string"
+        },
+        "content": {
+          "additionalProperties": true,
+          "title": "Content",
+          "type": "object"
+        }
+      },
+      "required": [
+        "id",
+        "version",
+        "sha256",
+        "content"
+      ],
+      "title": "VersionReference",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "2.0",
+      "default": "2.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "id": {
+      "title": "Id",
+      "type": "string"
+    },
+    "dataset": {
+      "$ref": "#/$defs/VersionReference"
+    },
+    "agent": {
+      "$ref": "#/$defs/VersionReference"
+    },
+    "evaluator": {
+      "$ref": "#/$defs/VersionReference"
+    },
+    "tool_schema": {
+      "$ref": "#/$defs/VersionReference"
+    },
+    "tool_schema_version": {
+      "const": "support-tools-v1",
+      "title": "Tool Schema Version",
+      "type": "string"
+    },
+    "split": {
+      "enum": [
+        "development",
+        "held-out",
+        "all"
+      ],
+      "title": "Split",
+      "type": "string"
+    },
+    "trials": {
+      "maximum": 5,
+      "minimum": 1,
+      "title": "Trials",
+      "type": "integer"
+    },
+    "scenario_ids": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 50,
+      "minItems": 1,
+      "title": "Scenario Ids",
+      "type": "array"
+    },
+    "traceparent": {
+      "title": "Traceparent",
+      "type": "string"
+    }
+  },
+  "required": [
+    "id",
+    "dataset",
+    "agent",
+    "evaluator",
+    "tool_schema",
+    "tool_schema_version",
+    "split",
+    "trials",
+    "scenario_ids",
+    "traceparent"
+  ],
+  "title": "EvaluationManifest",
+  "type": "object"
+}

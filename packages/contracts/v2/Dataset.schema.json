@@ -1,0 +1,662 @@
+{
+  "$defs": {
+    "Assertions": {
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": "2.0",
+          "default": "2.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "id": {
+          "pattern": "^[a-z][a-z0-9-]{1,63}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "version": {
+          "minimum": 1,
+          "title": "Version",
+          "type": "integer"
+        },
+        "final_state": {
+          "additionalProperties": true,
+          "title": "Final State",
+          "type": "object"
+        },
+        "effect_counts": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "propertyNames": {
+            "enum": [
+              "cancellation",
+              "refund",
+              "address_change",
+              "approval"
+            ]
+          },
+          "title": "Effect Counts",
+          "type": "object"
+        },
+        "forbidden_effects": {
+          "items": {
+            "enum": [
+              "cancellation",
+              "refund",
+              "address_change",
+              "approval"
+            ],
+            "type": "string"
+          },
+          "title": "Forbidden Effects",
+          "type": "array"
+        },
+        "resolution": {
+          "enum": [
+            "completed",
+            "rejected",
+            "blocked"
+          ],
+          "title": "Resolution",
+          "type": "string"
+        },
+        "evidence": {
+          "anyOf": [
+            {
+              "enum": [
+                "effect",
+                "read",
+                "rejection",
+                "ownership_read",
+                "invalid_request",
+                "balance_read_or_rejection",
+                "blocked_policy",
+                "blocked_approval",
+                "blocked_budget",
+                "read_unavailable",
+                "blocked_read",
+                "blocked_tool"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Evidence"
+        },
+        "alternatives": {
+          "items": {
+            "$ref": "#/$defs/ExpectedOutcome"
+          },
+          "maxItems": 2,
+          "title": "Alternatives",
+          "type": "array"
+        },
+        "effect_count_bounds": {
+          "additionalProperties": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          "propertyNames": {
+            "const": "refund"
+          },
+          "title": "Effect Count Bounds",
+          "type": "object"
+        },
+        "recovery_required": {
+          "default": false,
+          "title": "Recovery Required",
+          "type": "boolean"
+        },
+        "fault_observed": {
+          "default": false,
+          "title": "Fault Observed",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "version",
+        "final_state",
+        "effect_counts",
+        "forbidden_effects",
+        "resolution"
+      ],
+      "title": "Assertions",
+      "type": "object"
+    },
+    "ExpectedOutcome": {
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": "2.0",
+          "default": "2.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "final_state": {
+          "additionalProperties": true,
+          "title": "Final State",
+          "type": "object"
+        },
+        "effect_counts": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "propertyNames": {
+            "enum": [
+              "cancellation",
+              "refund",
+              "address_change",
+              "approval"
+            ]
+          },
+          "title": "Effect Counts",
+          "type": "object"
+        },
+        "resolution": {
+          "enum": [
+            "completed",
+            "rejected",
+            "blocked"
+          ],
+          "title": "Resolution",
+          "type": "string"
+        },
+        "evidence": {
+          "enum": [
+            "effect",
+            "read",
+            "rejection",
+            "ownership_read",
+            "invalid_request",
+            "balance_read_or_rejection",
+            "blocked_policy",
+            "blocked_approval",
+            "blocked_budget",
+            "read_unavailable",
+            "blocked_read",
+            "blocked_tool"
+          ],
+          "title": "Evidence",
+          "type": "string"
+        }
+      },
+      "required": [
+        "final_state",
+        "effect_counts",
+        "resolution",
+        "evidence"
+      ],
+      "title": "ExpectedOutcome",
+      "type": "object"
+    },
+    "FaultProfile": {
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": "2.0",
+          "default": "2.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "id": {
+          "pattern": "^[a-z][a-z0-9-]{1,63}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "version": {
+          "minimum": 1,
+          "title": "Version",
+          "type": "integer"
+        },
+        "kind": {
+          "enum": [
+            "none",
+            "timeout_before_commit",
+            "timeout_after_commit",
+            "temporary_api_failure",
+            "permanent_api_failure",
+            "malformed_response",
+            "duplicate_tool_request",
+            "delayed_response",
+            "permission_denial"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "tool": {
+          "enum": [
+            "get_order",
+            "cancel_order",
+            "refund_order",
+            "update_address",
+            "request_approval"
+          ],
+          "title": "Tool",
+          "type": "string"
+        },
+        "trigger": {
+          "default": 1,
+          "maximum": 16,
+          "minimum": 1,
+          "title": "Trigger",
+          "type": "integer"
+        },
+        "count": {
+          "default": 1,
+          "maximum": 3,
+          "minimum": 1,
+          "title": "Count",
+          "type": "integer"
+        },
+        "delay_ms": {
+          "default": 0,
+          "maximum": 2000,
+          "minimum": 0,
+          "title": "Delay Ms",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "version",
+        "kind",
+        "tool"
+      ],
+      "title": "FaultProfile",
+      "type": "object"
+    },
+    "Fixture": {
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": "2.0",
+          "default": "2.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "id": {
+          "pattern": "^[a-z][a-z0-9-]{1,63}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "version": {
+          "minimum": 1,
+          "title": "Version",
+          "type": "integer"
+        },
+        "order": {
+          "$ref": "#/$defs/Order"
+        }
+      },
+      "required": [
+        "id",
+        "version",
+        "order"
+      ],
+      "title": "Fixture",
+      "type": "object"
+    },
+    "Limits": {
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": "2.0",
+          "default": "2.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "max_tool_calls": {
+          "default": 12,
+          "maximum": 32,
+          "minimum": 1,
+          "title": "Max Tool Calls",
+          "type": "integer"
+        },
+        "wall_ms": {
+          "default": 5000,
+          "maximum": 10000,
+          "minimum": 10,
+          "title": "Wall Ms",
+          "type": "integer"
+        }
+      },
+      "title": "Limits",
+      "type": "object"
+    },
+    "Order": {
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": "2.0",
+          "default": "2.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "order_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Order Id",
+          "type": "string"
+        },
+        "customer_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Customer Id",
+          "type": "string"
+        },
+        "exists": {
+          "default": true,
+          "title": "Exists",
+          "type": "boolean"
+        },
+        "status": {
+          "default": "active",
+          "enum": [
+            "active",
+            "cancelled",
+            "shipped"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "total_cents": {
+          "maximum": 1000000,
+          "minimum": 1,
+          "title": "Total Cents",
+          "type": "integer"
+        },
+        "refunded_cents": {
+          "minimum": 0,
+          "title": "Refunded Cents",
+          "type": "integer"
+        },
+        "address": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Address",
+          "type": "string"
+        },
+        "approved": {
+          "default": false,
+          "title": "Approved",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "order_id",
+        "customer_id",
+        "total_cents",
+        "refunded_cents",
+        "address"
+      ],
+      "title": "Order",
+      "type": "object"
+    },
+    "Permissions": {
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": "2.0",
+          "default": "2.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "tools": {
+          "items": {
+            "enum": [
+              "get_order",
+              "cancel_order",
+              "refund_order",
+              "update_address",
+              "request_approval"
+            ],
+            "type": "string"
+          },
+          "maxItems": 5,
+          "minItems": 0,
+          "title": "Tools",
+          "type": "array"
+        },
+        "approval_required": {
+          "default": false,
+          "title": "Approval Required",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "tools"
+      ],
+      "title": "Permissions",
+      "type": "object"
+    },
+    "Scenario": {
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": "2.0",
+          "default": "2.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "id": {
+          "pattern": "^[a-z][a-z0-9-]{1,63}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "version": {
+          "minimum": 1,
+          "title": "Version",
+          "type": "integer"
+        },
+        "title": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        },
+        "split": {
+          "enum": [
+            "development",
+            "held-out"
+          ],
+          "title": "Split",
+          "type": "string"
+        },
+        "category": {
+          "enum": [
+            "success",
+            "invalid-request",
+            "permission",
+            "approval",
+            "fault",
+            "recovery",
+            "limits"
+          ],
+          "title": "Category",
+          "type": "string"
+        },
+        "fixture": {
+          "$ref": "#/$defs/Fixture"
+        },
+        "request": {
+          "$ref": "#/$defs/UserRequest"
+        },
+        "permissions": {
+          "$ref": "#/$defs/Permissions"
+        },
+        "fault": {
+          "$ref": "#/$defs/FaultProfile"
+        },
+        "assertions": {
+          "$ref": "#/$defs/Assertions"
+        },
+        "limits": {
+          "$ref": "#/$defs/Limits"
+        },
+        "review": {
+          "maxLength": 1000,
+          "minLength": 20,
+          "title": "Review",
+          "type": "string"
+        },
+        "reference_outcome": {
+          "const": "PASS",
+          "default": "PASS",
+          "title": "Reference Outcome",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "version",
+        "title",
+        "split",
+        "category",
+        "fixture",
+        "request",
+        "permissions",
+        "fault",
+        "assertions",
+        "limits",
+        "review"
+      ],
+      "title": "Scenario",
+      "type": "object"
+    },
+    "UserRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": "2.0",
+          "default": "2.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "text": {
+          "maxLength": 1000,
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        },
+        "action": {
+          "enum": [
+            "cancel",
+            "refund",
+            "address",
+            "status"
+          ],
+          "title": "Action",
+          "type": "string"
+        },
+        "order_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Order Id",
+          "type": "string"
+        },
+        "customer_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Customer Id",
+          "type": "string"
+        },
+        "amount_cents": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Amount Cents"
+        },
+        "address": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Address"
+        },
+        "user_approved": {
+          "default": false,
+          "title": "User Approved",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "text",
+        "action",
+        "order_id",
+        "customer_id"
+      ],
+      "title": "UserRequest",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "2.0",
+      "default": "2.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "id": {
+      "pattern": "^[a-z][a-z0-9-]{1,63}$",
+      "title": "Id",
+      "type": "string"
+    },
+    "version": {
+      "minimum": 1,
+      "title": "Version",
+      "type": "integer"
+    },
+    "title": {
+      "title": "Title",
+      "type": "string"
+    },
+    "publication": {
+      "const": "published",
+      "title": "Publication",
+      "type": "string"
+    },
+    "review_method": {
+      "title": "Review Method",
+      "type": "string"
+    },
+    "scenarios": {
+      "items": {
+        "$ref": "#/$defs/Scenario"
+      },
+      "maxItems": 50,
+      "minItems": 1,
+      "title": "Scenarios",
+      "type": "array"
+    }
+  },
+  "required": [
+    "id",
+    "version",
+    "title",
+    "publication",
+    "review_method",
+    "scenarios"
+  ],
+  "title": "Dataset",
+  "type": "object"
+}

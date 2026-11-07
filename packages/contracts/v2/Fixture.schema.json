@@ -1,0 +1,102 @@
+{
+  "$defs": {
+    "Order": {
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": "2.0",
+          "default": "2.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "order_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Order Id",
+          "type": "string"
+        },
+        "customer_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Customer Id",
+          "type": "string"
+        },
+        "exists": {
+          "default": true,
+          "title": "Exists",
+          "type": "boolean"
+        },
+        "status": {
+          "default": "active",
+          "enum": [
+            "active",
+            "cancelled",
+            "shipped"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "total_cents": {
+          "maximum": 1000000,
+          "minimum": 1,
+          "title": "Total Cents",
+          "type": "integer"
+        },
+        "refunded_cents": {
+          "minimum": 0,
+          "title": "Refunded Cents",
+          "type": "integer"
+        },
+        "address": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Address",
+          "type": "string"
+        },
+        "approved": {
+          "default": false,
+          "title": "Approved",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "order_id",
+        "customer_id",
+        "total_cents",
+        "refunded_cents",
+        "address"
+      ],
+      "title": "Order",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "2.0",
+      "default": "2.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "id": {
+      "pattern": "^[a-z][a-z0-9-]{1,63}$",
+      "title": "Id",
+      "type": "string"
+    },
+    "version": {
+      "minimum": 1,
+      "title": "Version",
+      "type": "integer"
+    },
+    "order": {
+      "$ref": "#/$defs/Order"
+    }
+  },
+  "required": [
+    "id",
+    "version",
+    "order"
+  ],
+  "title": "Fixture",
+  "type": "object"
+}

@@ -1,0 +1,21 @@
+{
+  "schema_version": "2.0",
+  "id": "support-evaluator",
+  "version": 2,
+  "implementation": "support-evaluator-v2",
+  "tool_schema_version": "support-tools-v1",
+  "checks": [
+    "final_state",
+    "side_effects",
+    "forbidden_effects",
+    "unauthorized_actions",
+    "tool_arguments",
+    "required_approval",
+    "execution_limits",
+    "resolution",
+    "fault_observed",
+    "recovery",
+    "task_evidence"
+  ],
+  "audit": "T01 independently derived scripted reference corpus; legacy evaluator v1 retained for dataset v1/v2."
+}

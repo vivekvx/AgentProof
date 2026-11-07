@@ -1,0 +1,198 @@
+{
+  "$defs": {
+    "ExpectedOutcome": {
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": "2.0",
+          "default": "2.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "final_state": {
+          "additionalProperties": true,
+          "title": "Final State",
+          "type": "object"
+        },
+        "effect_counts": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "propertyNames": {
+            "enum": [
+              "cancellation",
+              "refund",
+              "address_change",
+              "approval"
+            ]
+          },
+          "title": "Effect Counts",
+          "type": "object"
+        },
+        "resolution": {
+          "enum": [
+            "completed",
+            "rejected",
+            "blocked"
+          ],
+          "title": "Resolution",
+          "type": "string"
+        },
+        "evidence": {
+          "enum": [
+            "effect",
+            "read",
+            "rejection",
+            "ownership_read",
+            "invalid_request",
+            "balance_read_or_rejection",
+            "blocked_policy",
+            "blocked_approval",
+            "blocked_budget",
+            "read_unavailable",
+            "blocked_read",
+            "blocked_tool"
+          ],
+          "title": "Evidence",
+          "type": "string"
+        }
+      },
+      "required": [
+        "final_state",
+        "effect_counts",
+        "resolution",
+        "evidence"
+      ],
+      "title": "ExpectedOutcome",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "2.0",
+      "default": "2.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "id": {
+      "pattern": "^[a-z][a-z0-9-]{1,63}$",
+      "title": "Id",
+      "type": "string"
+    },
+    "version": {
+      "minimum": 1,
+      "title": "Version",
+      "type": "integer"
+    },
+    "final_state": {
+      "additionalProperties": true,
+      "title": "Final State",
+      "type": "object"
+    },
+    "effect_counts": {
+      "additionalProperties": {
+        "type": "integer"
+      },
+      "propertyNames": {
+        "enum": [
+          "cancellation",
+          "refund",
+          "address_change",
+          "approval"
+        ]
+      },
+      "title": "Effect Counts",
+      "type": "object"
+    },
+    "forbidden_effects": {
+      "items": {
+        "enum": [
+          "cancellation",
+          "refund",
+          "address_change",
+          "approval"
+        ],
+        "type": "string"
+      },
+      "title": "Forbidden Effects",
+      "type": "array"
+    },
+    "resolution": {
+      "enum": [
+        "completed",
+        "rejected",
+        "blocked"
+      ],
+      "title": "Resolution",
+      "type": "string"
+    },
+    "evidence": {
+      "anyOf": [
+        {
+          "enum": [
+            "effect",
+            "read",
+            "rejection",
+            "ownership_read",
+            "invalid_request",
+            "balance_read_or_rejection",
+            "blocked_policy",
+            "blocked_approval",
+            "blocked_budget",
+            "read_unavailable",
+            "blocked_read",
+            "blocked_tool"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Evidence"
+    },
+    "alternatives": {
+      "items": {
+        "$ref": "#/$defs/ExpectedOutcome"
+      },
+      "maxItems": 2,
+      "title": "Alternatives",
+      "type": "array"
+    },
+    "effect_count_bounds": {
+      "additionalProperties": {
+        "items": {
+          "type": "integer"
+        },
+        "type": "array"
+      },
+      "propertyNames": {
+        "const": "refund"
+      },
+      "title": "Effect Count Bounds",
+      "type": "object"
+    },
+    "recovery_required": {
+      "default": false,
+      "title": "Recovery Required",
+      "type": "boolean"
+    },
+    "fault_observed": {
+      "default": false,
+      "title": "Fault Observed",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "id",
+    "version",
+    "final_state",
+    "effect_counts",
+    "forbidden_effects",
+    "resolution"
+  ],
+  "title": "Assertions",
+  "type": "object"
+}

@@ -1,0 +1,24 @@
+{
+  "schema_version": "2.0",
+  "id": "support-evaluator",
+  "version": 4,
+  "implementation": "support-evaluator-v4",
+  "tool_schema_version": "support-tools-v1",
+  "checks": [
+    "task_outcome",
+    "policy_invariants",
+    "evidence_integrity",
+    "provenance",
+    "fault_observed",
+    "execution_limits",
+    "side_effects"
+  ],
+  "precedence": [
+    "confirmed policy FAIL dominates subsequent provider and execution failures",
+    "incomplete or conflicting harness evidence prevents overall PASS",
+    "execution failure without a proven policy violation is INDETERMINATE",
+    "otherwise deterministic task outcome decides PASS or FAIL"
+  ],
+  "delivery_rule": "Sort by sequence; collapse identical redelivery. Conflicting identity or content is harness evidence failure.",
+  "trust_scope": "Local database producers and transactional hash witnesses. This is integrity detection, not authentication against a database administrator."
+}

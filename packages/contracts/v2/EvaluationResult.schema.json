@@ -1,0 +1,469 @@
+{
+  "$defs": {
+    "AssertionEvidence": {
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": "2.0",
+          "default": "2.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "verdict": {
+          "enum": [
+            "PASS",
+            "FAIL",
+            "INDETERMINATE"
+          ],
+          "title": "Verdict",
+          "type": "string"
+        },
+        "expected": {
+          "title": "Expected"
+        },
+        "actual": {
+          "title": "Actual"
+        },
+        "event_sequences": {
+          "items": {
+            "type": "integer"
+          },
+          "title": "Event Sequences",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "verdict",
+        "expected",
+        "actual",
+        "event_sequences"
+      ],
+      "title": "AssertionEvidence",
+      "type": "object"
+    },
+    "Assessment": {
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": "2.0",
+          "default": "2.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "task": {
+          "enum": [
+            "PASS",
+            "FAIL",
+            "INDETERMINATE"
+          ],
+          "title": "Task",
+          "type": "string"
+        },
+        "policy": {
+          "enum": [
+            "PASS",
+            "FAIL",
+            "INDETERMINATE"
+          ],
+          "title": "Policy",
+          "type": "string"
+        },
+        "provider": {
+          "enum": [
+            "not_used",
+            "ok",
+            "error",
+            "unknown"
+          ],
+          "title": "Provider",
+          "type": "string"
+        },
+        "harness": {
+          "enum": [
+            "complete",
+            "incomplete",
+            "conflicting"
+          ],
+          "title": "Harness",
+          "type": "string"
+        },
+        "execution": {
+          "enum": [
+            "completed",
+            "provider",
+            "evaluator",
+            "infrastructure",
+            "cancelled"
+          ],
+          "title": "Execution",
+          "type": "string"
+        },
+        "overall": {
+          "enum": [
+            "PASS",
+            "FAIL",
+            "INDETERMINATE"
+          ],
+          "title": "Overall",
+          "type": "string"
+        },
+        "issues": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Issues",
+          "type": "array"
+        }
+      },
+      "required": [
+        "task",
+        "policy",
+        "provider",
+        "harness",
+        "execution",
+        "overall",
+        "issues"
+      ],
+      "title": "Assessment",
+      "type": "object"
+    },
+    "Provenance": {
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": "2.0",
+          "default": "2.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "scenario_id": {
+          "title": "Scenario Id",
+          "type": "string"
+        },
+        "scenario_version": {
+          "title": "Scenario Version",
+          "type": "integer"
+        },
+        "scenario_sha256": {
+          "title": "Scenario Sha256",
+          "type": "string"
+        },
+        "dataset": {
+          "additionalProperties": true,
+          "title": "Dataset",
+          "type": "object"
+        },
+        "evaluator": {
+          "additionalProperties": true,
+          "title": "Evaluator",
+          "type": "object"
+        },
+        "agent": {
+          "additionalProperties": true,
+          "title": "Agent",
+          "type": "object"
+        },
+        "attempt": {
+          "additionalProperties": true,
+          "title": "Attempt",
+          "type": "object"
+        },
+        "evidence_sha256": {
+          "title": "Evidence Sha256",
+          "type": "string"
+        },
+        "receipt_count": {
+          "title": "Receipt Count",
+          "type": "integer"
+        },
+        "references_valid": {
+          "title": "References Valid",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "scenario_id",
+        "scenario_version",
+        "scenario_sha256",
+        "dataset",
+        "evaluator",
+        "agent",
+        "attempt",
+        "evidence_sha256",
+        "receipt_count",
+        "references_valid"
+      ],
+      "title": "Provenance",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "2.0",
+      "default": "2.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "trial_id": {
+      "title": "Trial Id",
+      "type": "string"
+    },
+    "scenario_id": {
+      "title": "Scenario Id",
+      "type": "string"
+    },
+    "verdict": {
+      "enum": [
+        "PASS",
+        "FAIL",
+        "INDETERMINATE"
+      ],
+      "title": "Verdict",
+      "type": "string"
+    },
+    "failure_category": {
+      "anyOf": [
+        {
+          "enum": [
+            "agent",
+            "provider",
+            "evaluator",
+            "infrastructure",
+            "cancelled"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Failure Category"
+    },
+    "evaluator_version": {
+      "enum": [
+        "support-evaluator-v1",
+        "support-evaluator-v2",
+        "support-evaluator-v3",
+        "support-evaluator-v4"
+      ],
+      "title": "Evaluator Version",
+      "type": "string"
+    },
+    "evaluator_sha256": {
+      "title": "Evaluator Sha256",
+      "type": "string"
+    },
+    "assertions": {
+      "items": {
+        "$ref": "#/$defs/AssertionEvidence"
+      },
+      "title": "Assertions",
+      "type": "array"
+    },
+    "assessment": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Assessment"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "provenance": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Provenance"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "final_state": {
+      "additionalProperties": true,
+      "title": "Final State",
+      "type": "object"
+    },
+    "effect_counts": {
+      "additionalProperties": {
+        "type": "integer"
+      },
+      "title": "Effect Counts",
+      "type": "object"
+    },
+    "unsafe_actions": {
+      "title": "Unsafe Actions",
+      "type": "integer"
+    },
+    "valid_tool_calls": {
+      "title": "Valid Tool Calls",
+      "type": "integer"
+    },
+    "tool_calls": {
+      "title": "Tool Calls",
+      "type": "integer"
+    },
+    "recovery_eligible": {
+      "title": "Recovery Eligible",
+      "type": "boolean"
+    },
+    "recovery_succeeded": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Recovery Succeeded"
+    },
+    "duplicate_side_effects": {
+      "title": "Duplicate Side Effects",
+      "type": "boolean"
+    },
+    "latency_ms": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Latency Ms"
+    },
+    "input_tokens": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Input Tokens"
+    },
+    "output_tokens": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Output Tokens"
+    },
+    "inference_cost_usd": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Inference Cost Usd"
+    },
+    "model_requests": {
+      "items": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "title": "Model Requests",
+      "type": "array"
+    },
+    "estimated_cost_usd": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Estimated Cost Usd"
+    },
+    "reported_cost_usd": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Reported Cost Usd"
+    },
+    "provider_error": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Provider Error"
+    },
+    "trace_id": {
+      "title": "Trace Id",
+      "type": "string"
+    },
+    "error": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Error"
+    }
+  },
+  "required": [
+    "trial_id",
+    "scenario_id",
+    "verdict",
+    "failure_category",
+    "evaluator_version",
+    "evaluator_sha256",
+    "assertions",
+    "final_state",
+    "effect_counts",
+    "unsafe_actions",
+    "valid_tool_calls",
+    "tool_calls",
+    "recovery_eligible",
+    "recovery_succeeded",
+    "duplicate_side_effects",
+    "latency_ms",
+    "trace_id"
+  ],
+  "title": "EvaluationResult",
+  "type": "object"
+}

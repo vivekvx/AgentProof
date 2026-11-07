@@ -1,0 +1,132 @@
+{
+  "schema_version": "2.0",
+  "id": "support-tools",
+  "version": 1,
+  "tools": {
+    "get_order": {
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": "2.0",
+          "default": "2.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "order_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Order Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "order_id"
+      ],
+      "title": "ToolArguments",
+      "type": "object"
+    },
+    "cancel_order": {
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": "2.0",
+          "default": "2.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "order_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Order Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "order_id"
+      ],
+      "title": "ToolArguments",
+      "type": "object"
+    },
+    "refund_order": {
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": "2.0",
+          "default": "2.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "order_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Order Id",
+          "type": "string"
+        },
+        "amount_cents": {
+          "exclusiveMinimum": 0,
+          "maximum": 1000000,
+          "title": "Amount Cents",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "order_id",
+        "amount_cents"
+      ],
+      "title": "RefundArguments",
+      "type": "object"
+    },
+    "update_address": {
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": "2.0",
+          "default": "2.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "order_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Order Id",
+          "type": "string"
+        },
+        "address": {
+          "maxLength": 200,
+          "minLength": 1,
+          "pattern": ".*\\S.*",
+          "title": "Address",
+          "type": "string"
+        }
+      },
+      "required": [
+        "order_id",
+        "address"
+      ],
+      "title": "AddressArguments",
+      "type": "object"
+    },
+    "request_approval": {
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": "2.0",
+          "default": "2.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "order_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Order Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "order_id"
+      ],
+      "title": "ToolArguments",
+      "type": "object"
+    }
+  }
+}

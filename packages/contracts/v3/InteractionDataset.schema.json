@@ -1,0 +1,458 @@
+{
+  "$defs": {
+    "Fixture": {
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": "2.0",
+          "default": "2.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "id": {
+          "pattern": "^[a-z][a-z0-9-]{1,63}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "version": {
+          "minimum": 1,
+          "title": "Version",
+          "type": "integer"
+        },
+        "order": {
+          "$ref": "#/$defs/Order"
+        }
+      },
+      "required": [
+        "id",
+        "version",
+        "order"
+      ],
+      "title": "Fixture",
+      "type": "object"
+    },
+    "InteractionScenario": {
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": "3.0",
+          "default": "3.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "id": {
+          "pattern": "^t07-[0-9]{3}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "version": {
+          "const": 1,
+          "title": "Version",
+          "type": "integer"
+        },
+        "title": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        },
+        "split": {
+          "enum": [
+            "development",
+            "held-out"
+          ],
+          "title": "Split",
+          "type": "string"
+        },
+        "category": {
+          "const": "interaction",
+          "title": "Category",
+          "type": "string"
+        },
+        "family": {
+          "pattern": "^[a-z][a-z0-9-]{1,63}$",
+          "title": "Family",
+          "type": "string"
+        },
+        "fixture": {
+          "$ref": "#/$defs/Fixture"
+        },
+        "initial_user": {
+          "maxLength": 500,
+          "minLength": 10,
+          "title": "Initial User",
+          "type": "string"
+        },
+        "requester_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Requester Id",
+          "type": "string"
+        },
+        "scripted_reply": {
+          "anyOf": [
+            {
+              "maxLength": 300,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Scripted Reply"
+        },
+        "clarification_field": {
+          "anyOf": [
+            {
+              "const": "amount_cents",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Clarification Field"
+        },
+        "permissions": {
+          "items": {
+            "enum": [
+              "get_order",
+              "cancel_order",
+              "refund_order",
+              "update_address",
+              "request_approval"
+            ],
+            "type": "string"
+          },
+          "maxItems": 5,
+          "minItems": 1,
+          "title": "Permissions",
+          "type": "array"
+        },
+        "approval_required": {
+          "title": "Approval Required",
+          "type": "boolean"
+        },
+        "user_approved": {
+          "title": "User Approved",
+          "type": "boolean"
+        },
+        "must_read": {
+          "title": "Must Read",
+          "type": "boolean"
+        },
+        "untrusted_tool_note": {
+          "anyOf": [
+            {
+              "maxLength": 500,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Untrusted Tool Note"
+        },
+        "obligations": {
+          "items": {
+            "$ref": "#/$defs/Obligation"
+          },
+          "maxItems": 3,
+          "minItems": 1,
+          "title": "Obligations",
+          "type": "array"
+        },
+        "limits": {
+          "$ref": "#/$defs/Limits"
+        },
+        "fault": {
+          "const": "none",
+          "default": "none",
+          "title": "Fault",
+          "type": "string"
+        },
+        "review": {
+          "maxLength": 1000,
+          "minLength": 20,
+          "title": "Review",
+          "type": "string"
+        },
+        "reference_outcome": {
+          "const": "PASS",
+          "default": "PASS",
+          "title": "Reference Outcome",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "version",
+        "title",
+        "split",
+        "category",
+        "family",
+        "fixture",
+        "initial_user",
+        "requester_id",
+        "permissions",
+        "approval_required",
+        "user_approved",
+        "must_read",
+        "obligations",
+        "limits",
+        "review"
+      ],
+      "title": "InteractionScenario",
+      "type": "object"
+    },
+    "Limits": {
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": "2.0",
+          "default": "2.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "max_tool_calls": {
+          "default": 12,
+          "maximum": 32,
+          "minimum": 1,
+          "title": "Max Tool Calls",
+          "type": "integer"
+        },
+        "wall_ms": {
+          "default": 5000,
+          "maximum": 10000,
+          "minimum": 10,
+          "title": "Wall Ms",
+          "type": "integer"
+        }
+      },
+      "title": "Limits",
+      "type": "object"
+    },
+    "Obligation": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "pattern": "^[a-z][a-z0-9-]{1,63}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "effect": {
+          "enum": [
+            "cancellation",
+            "refund",
+            "address_change"
+          ],
+          "title": "Effect",
+          "type": "string"
+        },
+        "amount_cents": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Amount Cents"
+        },
+        "address": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Address"
+        }
+      },
+      "required": [
+        "id",
+        "effect"
+      ],
+      "title": "Obligation",
+      "type": "object"
+    },
+    "Order": {
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": "2.0",
+          "default": "2.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "order_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Order Id",
+          "type": "string"
+        },
+        "customer_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Customer Id",
+          "type": "string"
+        },
+        "exists": {
+          "default": true,
+          "title": "Exists",
+          "type": "boolean"
+        },
+        "status": {
+          "default": "active",
+          "enum": [
+            "active",
+            "cancelled",
+            "shipped"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "total_cents": {
+          "maximum": 1000000,
+          "minimum": 1,
+          "title": "Total Cents",
+          "type": "integer"
+        },
+        "refunded_cents": {
+          "minimum": 0,
+          "title": "Refunded Cents",
+          "type": "integer"
+        },
+        "address": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Address",
+          "type": "string"
+        },
+        "approved": {
+          "default": false,
+          "title": "Approved",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "order_id",
+        "customer_id",
+        "total_cents",
+        "refunded_cents",
+        "address"
+      ],
+      "title": "Order",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "3.0",
+      "default": "3.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "id": {
+      "const": "customer-support",
+      "title": "Id",
+      "type": "string"
+    },
+    "version": {
+      "const": 6,
+      "title": "Version",
+      "type": "integer"
+    },
+    "title": {
+      "title": "Title",
+      "type": "string"
+    },
+    "publication": {
+      "const": "published",
+      "title": "Publication",
+      "type": "string"
+    },
+    "review_method": {
+      "title": "Review Method",
+      "type": "string"
+    },
+    "source_dataset_sha256": {
+      "pattern": "^[a-f0-9]{64}$",
+      "title": "Source Dataset Sha256",
+      "type": "string"
+    },
+    "source_evaluator_sha256": {
+      "pattern": "^[a-f0-9]{64}$",
+      "title": "Source Evaluator Sha256",
+      "type": "string"
+    },
+    "authoring_fixture_sha256": {
+      "pattern": "^[a-f0-9]{64}$",
+      "title": "Authoring Fixture Sha256",
+      "type": "string"
+    },
+    "authoring_oracle_sha256": {
+      "pattern": "^[a-f0-9]{64}$",
+      "title": "Authoring Oracle Sha256",
+      "type": "string"
+    },
+    "review_status": {
+      "const": "automated-review-development-only",
+      "title": "Review Status",
+      "type": "string"
+    },
+    "split_policy": {
+      "minLength": 20,
+      "title": "Split Policy",
+      "type": "string"
+    },
+    "family_links": {
+      "additionalProperties": {
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      },
+      "title": "Family Links",
+      "type": "object"
+    },
+    "scenarios": {
+      "items": {
+        "$ref": "#/$defs/InteractionScenario"
+      },
+      "maxItems": 50,
+      "minItems": 1,
+      "title": "Scenarios",
+      "type": "array"
+    }
+  },
+  "required": [
+    "id",
+    "version",
+    "title",
+    "publication",
+    "review_method",
+    "source_dataset_sha256",
+    "source_evaluator_sha256",
+    "authoring_fixture_sha256",
+    "authoring_oracle_sha256",
+    "review_status",
+    "split_policy",
+    "family_links",
+    "scenarios"
+  ],
+  "title": "InteractionDataset",
+  "type": "object"
+}

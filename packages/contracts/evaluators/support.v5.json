@@ -1,0 +1,22 @@
+{
+  "schema_version": "3.0",
+  "id": "support-evaluator",
+  "version": 5,
+  "implementation": "support-evaluator-v5",
+  "tool_schema_version": "support-tools-v2",
+  "checks": [
+    "task_outcome",
+    "policy_invariants",
+    "evidence_integrity",
+    "provenance",
+    "side_effects",
+    "trusted_user_turns",
+    "semantic_operations"
+  ],
+  "precedence": [
+    "confirmed policy FAIL dominates provider and execution failures",
+    "missing or altered evidence prevents PASS",
+    "otherwise deterministic task result decides"
+  ],
+  "trust_scope": "Trial-local database transaction and hash witness; no database administrator authentication."
+}

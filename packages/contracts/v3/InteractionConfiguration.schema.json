@@ -1,0 +1,64 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "3.0",
+      "default": "3.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "dataset_id": {
+      "const": "customer-support",
+      "title": "Dataset Id",
+      "type": "string"
+    },
+    "dataset_version": {
+      "const": 6,
+      "title": "Dataset Version",
+      "type": "integer"
+    },
+    "agent_id": {
+      "pattern": "^[a-z][a-z0-9-]{1,63}$",
+      "title": "Agent Id",
+      "type": "string"
+    },
+    "agent_version": {
+      "const": 1,
+      "title": "Agent Version",
+      "type": "integer"
+    },
+    "split": {
+      "default": "development",
+      "enum": [
+        "development",
+        "held-out",
+        "all"
+      ],
+      "title": "Split",
+      "type": "string"
+    },
+    "trials": {
+      "default": 1,
+      "maximum": 5,
+      "minimum": 1,
+      "title": "Trials",
+      "type": "integer"
+    },
+    "scenario_ids": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 50,
+      "title": "Scenario Ids",
+      "type": "array"
+    }
+  },
+  "required": [
+    "dataset_id",
+    "dataset_version",
+    "agent_id",
+    "agent_version"
+  ],
+  "title": "InteractionConfiguration",
+  "type": "object"
+}

@@ -1,0 +1,129 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "2.0",
+      "default": "2.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "provider": {
+      "const": "openai-compatible",
+      "title": "Provider",
+      "type": "string"
+    },
+    "model": {
+      "maxLength": 120,
+      "minLength": 1,
+      "title": "Model",
+      "type": "string"
+    },
+    "base_url": {
+      "pattern": "^https?://[^?#@]+$",
+      "title": "Base Url",
+      "type": "string"
+    },
+    "api_key_env": {
+      "pattern": "^[A-Z][A-Z0-9_]{1,100}$",
+      "title": "Api Key Env",
+      "type": "string"
+    },
+    "tool_calling": {
+      "const": true,
+      "title": "Tool Calling",
+      "type": "boolean"
+    },
+    "timeout_seconds": {
+      "default": 10.0,
+      "exclusiveMinimum": 0,
+      "maximum": 30,
+      "title": "Timeout Seconds",
+      "type": "number"
+    },
+    "temperature": {
+      "default": 0.0,
+      "maximum": 2,
+      "minimum": 0,
+      "title": "Temperature",
+      "type": "number"
+    },
+    "top_p": {
+      "default": 1.0,
+      "exclusiveMinimum": 0,
+      "maximum": 1,
+      "title": "Top P",
+      "type": "number"
+    },
+    "max_output_tokens": {
+      "default": 256,
+      "maximum": 4096,
+      "minimum": 16,
+      "title": "Max Output Tokens",
+      "type": "integer"
+    },
+    "max_requests": {
+      "default": 4,
+      "maximum": 20,
+      "minimum": 1,
+      "title": "Max Requests",
+      "type": "integer"
+    },
+    "max_tool_calls": {
+      "default": 10,
+      "maximum": 32,
+      "minimum": 1,
+      "title": "Max Tool Calls",
+      "type": "integer"
+    },
+    "max_tokens": {
+      "default": 64000,
+      "maximum": 100000,
+      "minimum": 128,
+      "title": "Max Tokens",
+      "type": "integer"
+    },
+    "max_estimated_cost_usd": {
+      "default": 0.01,
+      "exclusiveMinimum": 0,
+      "maximum": 5,
+      "title": "Max Estimated Cost Usd",
+      "type": "number"
+    },
+    "input_usd_per_million": {
+      "exclusiveMinimum": 0,
+      "maximum": 1000,
+      "title": "Input Usd Per Million",
+      "type": "number"
+    },
+    "output_usd_per_million": {
+      "exclusiveMinimum": 0,
+      "maximum": 10000,
+      "title": "Output Usd Per Million",
+      "type": "number"
+    },
+    "pricing_source": {
+      "maxLength": 500,
+      "pattern": "^https://",
+      "title": "Pricing Source",
+      "type": "string"
+    },
+    "pricing_checked_at": {
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+      "title": "Pricing Checked At",
+      "type": "string"
+    }
+  },
+  "required": [
+    "provider",
+    "model",
+    "base_url",
+    "api_key_env",
+    "tool_calling",
+    "input_usd_per_million",
+    "output_usd_per_million",
+    "pricing_source",
+    "pricing_checked_at"
+  ],
+  "title": "ModelConfiguration",
+  "type": "object"
+}
