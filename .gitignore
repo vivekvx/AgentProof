@@ -1,4 +1,6 @@
 .env
+.env.*
+!.env.example
 .venv/
 __pycache__/
 .pytest_cache/
@@ -7,6 +9,10 @@ dist/
 .local/
 playwright-report/
 test-results/
+*.log
+*.db
+*.sqlite
+*.dump
 *.egg-info/
 .DS_Store
 *.tsbuildinfo
