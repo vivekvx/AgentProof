@@ -1,4 +1,4 @@
-.PHONY: setup infra api worker web test test-unit test-integration test-e2e build contracts verify
+.PHONY: setup infra api worker web test test-unit test-integration test-e2e build contracts lint verify
 setup:
 	go mod download
 	uv sync --project engine --frozen
@@ -26,12 +26,21 @@ test-unit:
 test-integration:
 	@test -n "$$TEST_DATABASE_URL" || (echo 'Set TEST_DATABASE_URL'; exit 1)
 	@test -n "$$TEST_TEMPORAL_ADDRESS" || (echo 'Set TEST_TEMPORAL_ADDRESS'; exit 1)
+	@test -n "$$E2E_BASE_URL" || (echo 'Set E2E_BASE_URL'; exit 1)
+	@test -n "$$JAEGER_QUERY_URL" || (echo 'Set JAEGER_QUERY_URL'; exit 1)
+	@test -n "$$OTEL_EXPORTER_OTLP_ENDPOINT" || (echo 'Set OTEL_EXPORTER_OTLP_ENDPOINT'; exit 1)
 	go test ./...
 	uv run --project engine --frozen pytest -q
 test-e2e:
 	npm run test:e2e
+	node --test apps/web/test/proxy-auth.test.mjs
 test: test-unit test-e2e
-verify: build test-integration test-e2e
+lint:
+	uvx --from ruff ruff check engine/agentproof engine/tests scripts
+	uvx --from ruff ruff format --check engine/agentproof engine/tests scripts
+	uv run --project engine --frozen python scripts/check_contract_schemas.py
+	go vet ./...
+verify: lint build test-integration test-e2e
 
 .PHONY: dev-docker verify-docker
 dev-docker:

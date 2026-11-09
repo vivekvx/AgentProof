@@ -1,17 +1,42 @@
 name: Verify
 on: [push, pull_request]
+permissions:
+  contents: read
 jobs:
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
+      - name: Verify checkout identity
+        run: |
+          test -z "$(git status --porcelain)"
+          commit_tree=$(git rev-parse "${GITHUB_SHA}^{tree}")
+          echo "CI_COMMIT_TREE=$commit_tree" >> "$GITHUB_ENV"
+      - name: Generate ephemeral API token
+        run: echo "AGENTPROOF_API_TOKEN=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
       - run: mkdir -p .local/verification
       - run: docker compose up -d --build --wait
       - run: docker compose --profile verification build verify
-      - run: docker compose --profile verification run --rm verify
+      - run: >-
+          docker compose --profile verification run --rm
+          -e CI_COMMIT_SHA=${GITHUB_SHA}
+          -e CI_COMMIT_TREE=${CI_COMMIT_TREE}
+          -e CI_RUN_ID=${GITHUB_RUN_ID}
+          -e CI_RUN_ATTEMPT=${GITHUB_RUN_ATTEMPT}
+          -e CI_REPOSITORY=${GITHUB_REPOSITORY} verify
+          bash -o pipefail -c
+          'make verify 2>&1 | tee /evidence/verify.log &&
+          uv run --project engine --frozen python
+          scripts/verification_summary.py /evidence/verify.log'
       - if: always()
         run: docker compose logs --no-color > .local/verification/docker.log
+      - if: always()
+        run: docker compose images --format json > .local/verification/images.json
       - uses: actions/upload-artifact@v4
         if: always()
-        with: {name: verification-evidence, path: .local/verification/}
+        with:
+          name: verification-evidence
+          path: .local/verification/
+          if-no-files-found: error
+          retention-days: 14
