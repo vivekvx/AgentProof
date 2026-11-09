@@ -2,6 +2,7 @@ import asyncio
 import copy
 import time
 from collections import defaultdict
+from datetime import UTC
 
 from opentelemetry import trace
 from opentelemetry.propagate import extract
@@ -16,12 +17,12 @@ from ..telemetry import tracer
 from . import audited_evaluator, audited_evaluator_v3, evidence, validated_evaluator
 from .agent import run_reference
 from .contracts import (
-    AgentConfiguration,
     AgentOutcome,
     AssertionEvidence,
     EvaluationResult,
     PublicContext,
     Scenario,
+    parse_agent_configuration,
 )
 from .evaluator import evaluate
 from .llm import Journal, ProviderFailure, run_llm
@@ -47,6 +48,118 @@ async def execute_trial(trial_id, dsn=None, attempt=None):
     return await asyncio.to_thread(
         lambda: asyncio.run(_execute_trial(trial_id, dsn, attempt or {}))
     )
+
+
+def execution_mode(trial_id, dsn=None):
+    with connect(dsn) as conn:
+        row = conn.execute(
+            "SELECT e.manifest->'agent'->'content',e.manifest->'dataset'->>'version' FROM benchmark_trials t JOIN benchmark_evaluations e ON e.id=t.evaluation_id WHERE t.id=%s",
+            (trial_id,),
+        ).fetchone()
+        if not row:
+            raise ValueError("unknown benchmark trial")
+        if row[1] == "6":
+            return "interaction-reference"
+        config = parse_agent_configuration(row[0])
+        return config.execution_mode
+
+
+def prepare_external_trial(trial_id, attempt, dsn=None):
+    from .external_sessions import create
+
+    with connect(dsn) as conn, conn.transaction():
+        row = lock_trial(conn, trial_id)
+        evaluation_id, raw, _, result, manifest = row
+        if result is not None:
+            raise ValueError("trial is terminal")
+        scenario = Scenario.model_validate(raw)
+        config = parse_agent_configuration(manifest["agent"]["content"])
+        if config.execution_mode != "external":
+            raise ValueError("trial is not configured for external execution")
+        execution_provenance.record(conn, trial_id, "benchmark", manifest, raw)
+        conn.execute(
+            "UPDATE benchmark_trials SET status='running',started_at=COALESCE(started_at,clock_timestamp()) WHERE id=%s",
+            (trial_id,),
+        )
+        created = create(
+            conn,
+            trial_id,
+            evaluation_id,
+            scenario.id,
+            attempt,
+            config.external_session.session_ttl_seconds,
+        )
+        tools = manifest["tool_schema"]["content"]["tools"]
+        return {
+            "schema_version": "1.0",
+            "attempt": attempt,
+            "ttl_seconds": config.external_session.session_ttl_seconds,
+            "session_id": str(created.session.trial_id),
+            "run_id": str(evaluation_id),
+            "trial_id": str(trial_id),
+            "scenario_id": scenario.id,
+            "request": scenario.request.text,
+            "tools": [
+                {
+                    "name": name,
+                    "description": name.replace("_", " "),
+                    "input_schema": tools[name],
+                }
+                for name in scenario.permissions.tools
+            ],
+            "limits": {
+                "max_tool_calls": scenario.limits.max_tool_calls,
+                "max_message_bytes": 4096,
+            },
+            "deadline_unix_ms": int(
+                created.session.expires_at.astimezone(UTC).timestamp() * 1000
+            ),
+            "expires_at": created.session.expires_at.isoformat(),
+            "resume_token": None,
+        }
+
+
+def finalize_external_trial(trial_id, completion, attempt, dsn=None):
+    from .contracts import AgentOutcome
+
+    with connect(dsn) as conn, conn.transaction():
+        row = lock_trial(conn, trial_id)
+        if row[3] is not None:
+            return row[3]
+        expired = bool(completion.get("expired"))
+        cancelled = bool(completion.get("cancelled"))
+        claim = completion.get("outcome") if isinstance(completion, dict) else None
+        outcome = None
+        if not expired and isinstance(claim, dict):
+            normalized_claim = dict(claim)
+            if normalized_claim.get("resolution") == "refused":
+                normalized_claim["resolution"] = "rejected"
+            elif normalized_claim.get("resolution") == "unknown":
+                normalized_claim["resolution"] = "blocked"
+            for field in ("last_sequence", "message", "error_code"):
+                normalized_claim.pop(field, None)
+            outcome = AgentOutcome.model_validate(normalized_claim)
+        result = _validated_result(
+            conn,
+            trial_id,
+            outcome=outcome,
+            execution_error=(
+                "infrastructure" if expired else "cancelled" if cancelled else None
+            ),
+            attempt={"temporal.activity.attempt": attempt, "source": "external"},
+        )
+        conn.execute(
+            "UPDATE benchmark_trials SET status='completed',completed_at=clock_timestamp(),result=%s,agent_outcome=%s WHERE id=%s AND result IS NULL",
+            (
+                Jsonb(result.model_dump()),
+                Jsonb(outcome.model_dump()) if outcome else None,
+                trial_id,
+            ),
+        )
+        execution_provenance.bind_result(
+            conn, trial_id, "benchmark", result.model_dump()
+        )
+        return result.model_dump()
 
 
 async def _execute_trial(trial_id, dsn, attempt):
@@ -77,7 +190,11 @@ async def _execute_trial(trial_id, dsn, attempt):
             )
             if published != raw:
                 raise ValueError("trial scenario differs from published dataset")
-            config = AgentConfiguration.model_validate(manifest["agent"]["content"])
+            config = parse_agent_configuration(manifest["agent"]["content"])
+            if config.execution_mode == "external":
+                raise ValueError(
+                    "external trial must use the Temporal session lifecycle"
+                )
             execution_provenance.record(conn, trial_id, "benchmark", manifest, raw)
             conn.execute(
                 "UPDATE benchmark_trials SET status='running',started_at=COALESCE(started_at,clock_timestamp()) WHERE id=%s",

@@ -162,18 +162,18 @@ def record(conn, identity, kind, run_manifest, scenario=None, root=ROOT):
     ):
         source, content = safe_source(root)
     config = run_manifest["agent"]["content"] if kind != "run" else None
-    from .benchmark.contracts import AgentConfiguration
+    from .benchmark.contracts import AgentConfiguration, AgentConfigurationV3
     from .benchmark.interaction_contracts import InteractionAgentConfiguration
 
-    cfg = (
-        (
-            InteractionAgentConfiguration
-            if config.get("schema_version") == "3.0"
-            else AgentConfiguration
-        ).model_validate(config)
-        if config
-        else None
-    )
+    if config:
+        if config.get("policy") == "external":
+            cfg = AgentConfigurationV3.model_validate(config)
+        elif run_manifest.get("dataset", {}).get("version") == 6:
+            cfg = InteractionAgentConfiguration.model_validate(config)
+        else:
+            cfg = AgentConfiguration.model_validate(config)
+    else:
+        cfg = None
     execution_manifest = {
         "schema_version": SCHEMA,
         "runner_version": RUNNER,

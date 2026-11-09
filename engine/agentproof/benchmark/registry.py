@@ -3,7 +3,7 @@ import json
 import os
 from pathlib import Path
 
-from .contracts import AgentConfiguration, Dataset, EvaluationManifest
+from .contracts import Dataset, EvaluationManifest, parse_agent_configuration
 from .interaction_contracts import (
     InteractionAgentConfiguration,
     InteractionDataset,
@@ -40,9 +40,7 @@ def dataset(version=5):
 def agent(agent_id):
     if not __import__("re").fullmatch(r"[a-z][a-z0-9-]{1,63}", agent_id):
         raise ValueError("unknown agent configuration")
-    return AgentConfiguration.model_validate(
-        reference(f"agents/{agent_id}.v1.json")["content"]
-    )
+    return parse_agent_configuration(reference(f"agents/{agent_id}.v1.json")["content"])
 
 
 def validate_snapshot(manifest):
@@ -77,4 +75,4 @@ def validate_snapshot(manifest):
         if manifest[key] != reference(path):
             raise ValueError("unsupported immutable benchmark reference")
     Dataset.model_validate(manifest["dataset"]["content"])
-    AgentConfiguration.model_validate(manifest["agent"]["content"])
+    parse_agent_configuration(manifest["agent"]["content"])

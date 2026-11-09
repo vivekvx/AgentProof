@@ -125,7 +125,20 @@ class OrderSimulator:
         # A caller cannot disable the witness required by the stored publication.
         self.record_receipts = record_receipts or row[1]["evaluator"]["version"] == 4
 
-    async def call(self, tool: str, arguments: dict[str, Any]) -> dict:
+    async def call(
+        self,
+        tool: str,
+        arguments: dict[str, Any],
+        *,
+        sequence: int | None = None,
+        operation_id: str | None = None,
+        record_requested_tool: bool = False,
+    ) -> dict:
+        if sequence is not None:
+            if type(sequence) is not int or sequence < 1:
+                raise ValueError("invalid operation sequence")
+            self.sequence = sequence - 1
+        requested_tool = tool
         tool = (
             tool
             if type(tool) is str and re.fullmatch(r"[a-z_][a-z0-9_]{0,63}", tool)
@@ -149,7 +162,13 @@ class OrderSimulator:
                 }
             }
         try:
-            return await self._dispatch(tool, arguments, valid)
+            return await self._dispatch(
+                tool,
+                arguments,
+                valid,
+                operation_id,
+                requested_tool if record_requested_tool else None,
+            )
         except (TrialStopped, ReplayMismatch, EvaluatorFailure) as error:
             reason = (
                 "terminal"
@@ -179,7 +198,9 @@ class OrderSimulator:
                 pass
             raise
 
-    async def _dispatch(self, tool, arguments, valid):
+    async def _dispatch(
+        self, tool, arguments, valid, operation_id=None, requested_tool=None
+    ):
         self.sequence += 1
         operation_key = f"{self.trial_id}:support-tools-v1:{self.sequence}"
         with tracer.start_as_current_span(
@@ -214,7 +235,11 @@ class OrderSimulator:
                 ).fetchone()
                 if old:
                     event = old[0]
-                    if event["tool"] != tool or event["arguments"] != arguments:
+                    if (
+                        event["tool"] != tool
+                        or event["arguments"] != arguments
+                        or event.get("operation_id") != operation_id
+                    ):
                         raise ReplayMismatch("benchmark tool replay mismatch")
                     span.set_attribute("agentproof.replayed", True)
                 else:
@@ -325,6 +350,10 @@ class OrderSimulator:
                         "span_id": f"{ctx.span_id:016x}",
                         "attempt": self.attempt,
                     }
+                    if operation_id is not None:
+                        event["operation_id"] = operation_id
+                    if requested_tool is not None:
+                        event["requested_tool"] = requested_tool
                     self.conn.execute(
                         "INSERT INTO benchmark_events VALUES(%s,%s,%s,%s)",
                         (self.trial_id, self.sequence, operation_key, Jsonb(event)),

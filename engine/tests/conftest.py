@@ -90,10 +90,23 @@ def new_run(dsn):
 def benchmark_factory(dsn):
     created = []
 
-    def create(agent="support-safe", ids=None, trials=1, version=4):
+    def create(agent="support-safe", ids=None, trials=1, version=4, agent_config=None):
         evaluation_id = str(uuid.uuid4())
         ds = reference(f"benchmarks/support.v{version}.json")
-        cfg = reference(f"agents/{agent}.v1.json")
+        cfg = (
+            reference(f"agents/{agent}.v1.json")
+            if agent_config is None
+            else {
+                "id": agent_config["id"],
+                "version": agent_config["version"],
+                "sha256": hashlib.sha256(
+                    json.dumps(
+                        agent_config, sort_keys=True, separators=(",", ":")
+                    ).encode()
+                ).hexdigest(),
+                "content": agent_config,
+            }
+        )
         cases = [s for s in ds["content"]["scenarios"] if ids is None or s["id"] in ids]
         manifest = {
             "schema_version": "3.0" if version == 6 else "2.0",
@@ -157,6 +170,10 @@ def benchmark_factory(dsn):
                 )
             ]
             for trial_id in ids:
+                conn.execute(
+                    "DELETE FROM benchmark_external_sessions WHERE trial_id=%s",
+                    (trial_id,),
+                )
                 conn.execute(
                     "DELETE FROM benchmark_execution_provenance WHERE trial_id=%s",
                     (trial_id,),

@@ -17,10 +17,76 @@ from agentproof.benchmark.registry import dataset
 from agentproof.benchmark.workflow import BenchmarkWorkflow
 from conftest import ROOT
 from temporalio import activity
-from temporalio.client import Client, WorkflowFailureError
+from temporalio.client import Client, WorkflowFailureError, WorkflowUpdateFailedError
 from temporalio.exceptions import ApplicationError, CancelledError
+from temporalio.service import RPCError
 from temporalio.testing import ActivityEnvironment
 from temporalio.worker import Replayer, Worker
+
+
+def external_agent_config(ttl=30):
+    return {
+        "schema_version": "3.0",
+        "id": "external-agent",
+        "version": 1,
+        "title": "External agent",
+        "policy": "external",
+        "model_configuration": {
+            "provider": "offline",
+            "model": "external-agent",
+            "external_calls": False,
+        },
+        "prompt": "Use the public request and permitted tools only.",
+        "prompt_version": "support-prompt-v1",
+        "tool_schema_version": "support-tools-v1",
+        "max_retries": 0,
+        "external_session": {
+            "execution_mode": "external",
+            "transport": "http-json",
+            "session_ttl_seconds": ttl,
+            "credential_scope": "single-trial",
+        },
+    }
+
+
+def install_external_profile(tmp_path, monkeypatch, ttl=30):
+    config = external_agent_config(ttl)
+    raw = json.dumps(config, sort_keys=True, separators=(",", ":")).encode()
+    (tmp_path / "external-agent.v1.json").write_bytes(raw)
+    monkeypatch.setenv("AGENTPROOF_MODEL_CONFIG_DIR", str(tmp_path))
+    return config
+
+
+async def wait_for_external_session(dsn, handle, trial_id):
+    for _ in range(300):
+        with psycopg.connect(dsn) as conn:
+            row = conn.execute(
+                "SELECT state,attempt FROM benchmark_external_sessions WHERE trial_id=%s",
+                (trial_id,),
+            ).fetchone()
+        if row and await handle.query(
+            BenchmarkWorkflow.external_trial_waiting, trial_id
+        ):
+            return row
+        await asyncio.sleep(0.05)
+    raise AssertionError("external session did not enter the waiting state")
+
+
+def external_worker(client, queue, waiting_activity=None, trial_activity=None):
+    registered = list(activities.ACTIVITIES)
+    if waiting_activity is not None:
+        registered = [
+            waiting_activity if item is activities.benchmark_external_wait else item
+            for item in registered
+        ]
+    if trial_activity is not None:
+        registered = [
+            trial_activity if item is activities.benchmark_trial else item
+            for item in registered
+        ]
+    return Worker(
+        client, task_queue=queue, workflows=[BenchmarkWorkflow], activities=registered
+    )
 
 
 @pytest.fixture
@@ -68,6 +134,7 @@ async def test_partial_failure_does_not_discard_other_trials(
         workflows=[BenchmarkWorkflow],
         activities=[
             activities.benchmark_plan,
+            activities.benchmark_execution_mode,
             partial,
             activities.benchmark_fail_trial,
             activities.benchmark_finalize,
@@ -87,6 +154,226 @@ async def test_partial_failure_does_not_discard_other_trials(
     assert (
         await Replayer(workflows=[BenchmarkWorkflow]).replay_workflow(history)
     ).replay_failure is None
+
+
+async def test_external_trial_waits_recovers_and_evaluates_trusted_evidence(
+    dsn, benchmark_factory, benchmark_temporal, monkeypatch, tmp_path
+):
+    config = install_external_profile(tmp_path, monkeypatch)
+    parent, ids, _ = benchmark_factory(ids=["cs-001"], version=5, agent_config=config)
+    trial_id = ids[0]
+    monkeypatch.setenv("DATABASE_URL", dsn)
+    captured = {}
+
+    @activity.defn(name="benchmark_external_wait")
+    async def capture_session(value: str) -> dict:
+        result = await activities.benchmark_external_wait(value)
+        captured[value] = result
+        return result
+
+    bundled_calls = []
+
+    @activity.defn(name="benchmark_trial")
+    async def forbidden_bundled_agent(value: str) -> dict:
+        bundled_calls.append(value)
+        raise AssertionError("external execution called the bundled agent")
+
+    client = await Client.connect(benchmark_temporal)
+    queue = "benchmark-external-" + str(uuid.uuid4())
+    handle = await client.start_workflow(
+        BenchmarkWorkflow.run, parent, id=queue, task_queue=queue
+    )
+    async with external_worker(client, queue, capture_session, forbidden_bundled_agent):
+        row = await wait_for_external_session(dsn, handle, trial_id)
+        assert row == ("waiting", 1)
+        assert trial_id in captured
+        session = captured[trial_id]
+        with psycopg.connect(dsn) as conn:
+            stored = conn.execute(
+                "SELECT evaluation_id,scenario_id,attempt,state,credential_hash "
+                "FROM benchmark_external_sessions WHERE trial_id=%s",
+                (trial_id,),
+            ).fetchone()
+            assert stored[:4] == (
+                uuid.UUID(parent),
+                "cs-001",
+                session["attempt"],
+                "waiting",
+            )
+            assert len(stored[4]) == 64
+            assert all(c in "0123456789abcdef" for c in stored[4])
+        assert session["session_id"] == trial_id
+
+    # A worker restart must continue the same workflow and session.
+    async with external_worker(client, queue, capture_session, forbidden_bundled_agent):
+        await wait_for_external_session(dsn, handle, trial_id)
+        with psycopg.connect(dsn) as conn:
+            awaitable_scenario = conn.execute(
+                "SELECT scenario FROM benchmark_trials WHERE id=%s", (trial_id,)
+            ).fetchone()[0]
+            from agentproof.benchmark.contracts import Scenario
+            from agentproof.benchmark.simulator import OrderSimulator
+
+            scenario = Scenario.model_validate(awaitable_scenario)
+            broker = OrderSimulator(
+                conn,
+                trial_id,
+                scenario,
+                attempt=session["attempt"],
+                record_receipts=True,
+            )
+            await broker.call("cancel_order", {"order_id": scenario.request.order_id})
+
+        base_payload = {
+            "trial_id": trial_id,
+            "attempt": session["attempt"],
+            "run_id": parent,
+            "last_sequence": 1,
+            "outcome": {"resolution": "completed"},
+        }
+        with pytest.raises(WorkflowUpdateFailedError):
+            await handle.execute_update(
+                BenchmarkWorkflow.complete_external_trial,
+                {**base_payload, "attempt": session["attempt"] + 1},
+            )
+        metrics = await asyncio.wait_for(
+            handle.execute_update(
+                BenchmarkWorkflow.complete_external_trial, base_payload
+            ),
+            20,
+        )
+        assert metrics == {"accepted": True}
+        final = await asyncio.wait_for(handle.result(), 20)
+        assert final["task_success_rate"]["value"] == 1
+        with pytest.raises((WorkflowUpdateFailedError, RPCError)):
+            await handle.execute_update(
+                BenchmarkWorkflow.complete_external_trial, base_payload
+            )
+        assert not bundled_calls
+        with psycopg.connect(dsn) as conn:
+            assert (
+                conn.execute(
+                    "SELECT count(*) FROM benchmark_external_sessions WHERE trial_id=%s",
+                    (trial_id,),
+                ).fetchone()[0]
+                == 1
+            )
+            session_state = conn.execute(
+                "SELECT state FROM benchmark_external_sessions WHERE trial_id=%s",
+                (trial_id,),
+            ).fetchone()[0]
+            result = conn.execute(
+                "SELECT result FROM benchmark_trials WHERE id=%s", (trial_id,)
+            ).fetchone()[0]
+            assert session_state == "completed"
+            assert result["verdict"] == "PASS"
+            assert result["tool_calls"] == 1
+        history = await handle.fetch_history()
+        assert (
+            await Replayer(workflows=[BenchmarkWorkflow]).replay_workflow(history)
+        ).replay_failure is None
+
+
+async def test_external_claim_without_broker_evidence_cannot_pass(
+    dsn, benchmark_factory, benchmark_temporal, monkeypatch, tmp_path
+):
+    config = install_external_profile(tmp_path, monkeypatch)
+    parent, ids, _ = benchmark_factory(ids=["cs-001"], version=5, agent_config=config)
+    monkeypatch.setenv("DATABASE_URL", dsn)
+    captured = {}
+
+    @activity.defn(name="benchmark_external_wait")
+    async def capture_session(value: str) -> dict:
+        result = await activities.benchmark_external_wait(value)
+        captured[value] = result
+        return result
+
+    client = await Client.connect(benchmark_temporal)
+    queue = "benchmark-external-no-evidence-" + str(uuid.uuid4())
+    handle = await client.start_workflow(
+        BenchmarkWorkflow.run, parent, id=queue, task_queue=queue
+    )
+    async with external_worker(client, queue, capture_session):
+        await wait_for_external_session(dsn, handle, ids[0])
+        result = await handle.execute_update(
+            BenchmarkWorkflow.complete_external_trial,
+            {
+                "trial_id": ids[0],
+                "attempt": captured[ids[0]]["attempt"],
+                "run_id": parent,
+                "last_sequence": 0,
+                "outcome": {"resolution": "completed"},
+            },
+        )
+        assert result["accepted"]
+        await asyncio.wait_for(handle.result(), 20)
+    with psycopg.connect(dsn) as conn:
+        verdict = conn.execute(
+            "SELECT result->>'verdict' FROM benchmark_trials WHERE id=%s", (ids[0],)
+        ).fetchone()[0]
+        assert verdict != "PASS"
+
+
+async def test_external_expiry_and_cancellation_are_persisted(
+    dsn, benchmark_factory, benchmark_temporal, monkeypatch, tmp_path
+):
+    config = install_external_profile(tmp_path, monkeypatch, ttl=2)
+    expired_eval, expired_ids, _ = benchmark_factory(
+        ids=["cs-001"], version=5, agent_config=config
+    )
+    cancelled_eval, cancelled_ids, _ = benchmark_factory(
+        ids=["cs-002"], version=5, agent_config=config
+    )
+    monkeypatch.setenv("DATABASE_URL", dsn)
+    client = await Client.connect(benchmark_temporal)
+
+    async def run_trial(evaluation_id, trial_id, cancel=False):
+        queue = "benchmark-external-terminal-" + str(uuid.uuid4())
+        handle = await client.start_workflow(
+            BenchmarkWorkflow.run, evaluation_id, id=queue, task_queue=queue
+        )
+        async with external_worker(client, queue):
+            await wait_for_external_session(dsn, handle, trial_id)
+            if cancel:
+                await handle.cancel()
+                with pytest.raises(WorkflowFailureError):
+                    await asyncio.wait_for(handle.result(), 20)
+            else:
+                await asyncio.wait_for(handle.result(), 20)
+
+    await run_trial(expired_eval, expired_ids[0])
+    with psycopg.connect(dsn) as conn:
+        assert (
+            conn.execute(
+                "SELECT state FROM benchmark_external_sessions WHERE trial_id=%s",
+                (expired_ids[0],),
+            ).fetchone()[0]
+            == "expired"
+        )
+        assert (
+            conn.execute(
+                "SELECT result->>'verdict' FROM benchmark_trials WHERE id=%s",
+                (expired_ids[0],),
+            ).fetchone()[0]
+            != "PASS"
+        )
+
+    await run_trial(cancelled_eval, cancelled_ids[0], cancel=True)
+    with psycopg.connect(dsn) as conn:
+        assert (
+            conn.execute(
+                "SELECT state FROM benchmark_external_sessions WHERE trial_id=%s",
+                (cancelled_ids[0],),
+            ).fetchone()[0]
+            == "cancelled"
+        )
+        assert (
+            conn.execute(
+                "SELECT result->>'verdict' FROM benchmark_trials WHERE id=%s",
+                (cancelled_ids[0],),
+            ).fetchone()[0]
+            != "PASS"
+        )
 
 
 async def test_benchmark_cancellation_finalizes_pending_trials(
@@ -111,6 +398,7 @@ async def test_benchmark_cancellation_finalizes_pending_trials(
         workflows=[BenchmarkWorkflow],
         activities=[
             activities.benchmark_plan,
+            activities.benchmark_execution_mode,
             waiting,
             activities.benchmark_fail_trial,
             activities.benchmark_finalize,

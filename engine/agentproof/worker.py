@@ -76,7 +76,7 @@ async def main():
     try:
         async with Worker(
             client,
-            task_queue="agentproof-v1",
+            task_queue=os.getenv("AGENTPROOF_TASK_QUEUE", "agentproof-v1"),
             workflows=[EvaluationWorkflow, BenchmarkWorkflow],
             activities=[
                 execute_evaluation,
