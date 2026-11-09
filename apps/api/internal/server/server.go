@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"github.com/go-chi/chi/v5"
@@ -21,8 +22,10 @@ import (
 	"go.temporal.io/sdk/interceptor"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"regexp"
+	"strings"
 	"time"
 )
 
@@ -48,8 +51,9 @@ func TemporalOptions(address string) (client.Options, error) {
 }
 
 type Server struct {
-	Pool    *pgxpool.Pool
-	Starter Starter
+	Pool        *pgxpool.Pool
+	Starter     Starter
+	BearerToken string
 }
 type Run struct {
 	ID        string            `json:"id"`
@@ -88,20 +92,56 @@ func ParseAgent(w http.ResponseWriter, r *http.Request) (string, error) {
 }
 func (s *Server) Routes() http.Handler {
 	r := chi.NewRouter()
-	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
-		ctx, cancel := context.WithTimeout(r.Context(), time.Second)
-		defer cancel()
-		if err := s.Pool.Ping(ctx); err != nil {
-			problem(w, 503, "database unavailable")
-			return
+	r.Group(func(api chi.Router) {
+		if s.BearerToken != "" {
+			api.Use(bearerAuthentication(s.BearerToken))
 		}
-		respond(w, 200, map[string]string{"status": "ok"})
+		api.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
+			ctx, cancel := context.WithTimeout(r.Context(), time.Second)
+			defer cancel()
+			if err := s.Pool.Ping(ctx); err != nil {
+				problem(w, 503, "database unavailable")
+				return
+			}
+			respond(w, 200, map[string]string{"status": "ok"})
+		})
+		s.benchmarkRoutes(api)
+		api.Post("/api/v2/external/sessions/{id}", s.createExternalSession)
+		api.Post("/api/v1/runs", s.create)
+		api.Get("/api/v1/runs", s.list)
+		api.Get("/api/v1/runs/{id}", s.inspect)
 	})
-	s.benchmarkRoutes(r)
-	r.Post("/api/v1/runs", s.create)
-	r.Get("/api/v1/runs", s.list)
-	r.Get("/api/v1/runs/{id}", s.inspect)
+	s.externalAgentRoutes(r)
 	return otelhttp.NewHandler(r, "agentproof.api")
+}
+
+func bearerAuthentication(token string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			provided := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+			if provided == r.Header.Get("Authorization") || len(provided) != len(token) || subtle.ConstantTimeCompare([]byte(provided), []byte(token)) != 1 {
+				w.Header().Set("WWW-Authenticate", "Bearer")
+				w.Header().Set("Cache-Control", "no-store")
+				problem(w, http.StatusUnauthorized, "authentication required")
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// ValidateListenSecurity requires a strong bearer token before a non-loopback bind.
+func ValidateListenSecurity(address, token string) error {
+	host, _, err := net.SplitHostPort(address)
+	if err != nil {
+		return errors.New("invalid API listen address")
+	}
+	ip := net.ParseIP(host)
+	loopback := (ip != nil && ip.IsLoopback()) || strings.EqualFold(host, "localhost")
+	if !loopback && len(token) < 32 {
+		return errors.New("non-loopback API listen requires AGENTPROOF_API_TOKEN with at least 32 characters")
+	}
+	return nil
 }
 func (s *Server) create(w http.ResponseWriter, r *http.Request) {
 	agent, err := ParseAgent(w, r)

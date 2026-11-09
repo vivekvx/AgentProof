@@ -61,7 +61,13 @@ func run() error {
 	api := &server.Server{Pool: pool, Starter: server.TemporalStarter{Client: temporal}}
 	go api.Dispatch(ctx)
 	go api.DispatchBenchmarks(ctx)
-	httpServer := &http.Server{Addr: env("API_ADDRESS", "127.0.0.1:8080"), Handler: api.Routes(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 15 * time.Second, IdleTimeout: 60 * time.Second}
+	listenAddress := env("API_ADDRESS", "127.0.0.1:8080")
+	apiToken := os.Getenv("AGENTPROOF_API_TOKEN")
+	if err := server.ValidateListenSecurity(listenAddress, apiToken); err != nil {
+		return err
+	}
+	api.BearerToken = apiToken
+	httpServer := &http.Server{Addr: listenAddress, Handler: api.Routes(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 15 * time.Second, IdleTimeout: 60 * time.Second}
 	go func() {
 		<-ctx.Done()
 		shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)

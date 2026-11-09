@@ -38,27 +38,38 @@ services:
     ports: ["127.0.0.1:${AGENTPROOF_JAEGER_PORT:-16686}:16686", "127.0.0.1:${AGENTPROOF_OTLP_PORT:-4318}:4318"]
   api:
     build: {context: ., dockerfile: Dockerfile.dev, target: api}
-    environment: &app_env
+    environment:
       DATABASE_URL: postgresql://agentproof:agentproof@postgres:5432/agentproof
       TEMPORAL_ADDRESS: temporal:7233
       OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
+      AGENTPROOF_API_TOKEN: ${AGENTPROOF_API_TOKEN:?Set AGENTPROOF_API_TOKEN to a random local secret}
     ports: ["127.0.0.1:${AGENTPROOF_API_PORT:-8080}:8080"]
     depends_on:
       postgres: {condition: service_healthy}
       temporal: {condition: service_healthy}
       jaeger: {condition: service_started}
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://localhost:8080/healthz"]
+      test:
+        - CMD-SHELL
+        - >-
+          curl -fsS -H "Authorization: Bearer $$AGENTPROOF_API_TOKEN"
+          http://localhost:8080/healthz
       interval: 2s
       timeout: 5s
       retries: 60
   worker:
     build: {context: ., dockerfile: Dockerfile.dev, target: worker}
-    environment: *app_env
+    environment:
+      DATABASE_URL: postgresql://agentproof:agentproof@postgres:5432/agentproof
+      TEMPORAL_ADDRESS: temporal:7233
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
     depends_on:
       api: {condition: service_healthy}
   web:
     build: {context: ., dockerfile: Dockerfile.dev, target: web}
+    environment:
+      API_PROXY_TARGET: http://api:8080
+      AGENTPROOF_API_TOKEN: ${AGENTPROOF_API_TOKEN:?Set AGENTPROOF_API_TOKEN to a random local secret}
     ports: ["127.0.0.1:${AGENTPROOF_WEB_PORT:-5173}:5173"]
     depends_on:
       api: {condition: service_healthy}
@@ -71,7 +82,10 @@ services:
     profiles: [verification]
     build: {context: ., dockerfile: Dockerfile.dev, target: verify}
     environment:
-      <<: *app_env
+      DATABASE_URL: postgresql://agentproof:agentproof@postgres:5432/agentproof
+      TEMPORAL_ADDRESS: temporal:7233
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
+      AGENTPROOF_API_TOKEN: ${AGENTPROOF_API_TOKEN:?Set AGENTPROOF_API_TOKEN to a random local secret}
       TEST_DATABASE_URL: postgresql://agentproof:agentproof@postgres:5432/agentproof_test
       TEST_TEMPORAL_ADDRESS: temporal:7233
       E2E_BASE_URL: http://web:5173

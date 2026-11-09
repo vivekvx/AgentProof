@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -209,6 +210,29 @@ func loadAgent(id string) (contracts.Reference, error) {
 	if err != nil {
 		return contracts.Reference{}, err
 	}
+	var schemaVersion struct {
+		SchemaVersion string `json:"schema_version"`
+	}
+	if err = json.Unmarshal(raw, &schemaVersion); err != nil {
+		return contracts.Reference{}, err
+	}
+	if schemaVersion.SchemaVersion == "3.0" {
+		if err = validateInteractionAsset("AgentConfiguration", raw); err != nil {
+			return contracts.Reference{}, err
+		}
+		var external struct {
+			ID      string `json:"id"`
+			Version int    `json:"version"`
+			Policy  string `json:"policy"`
+		}
+		if err = json.Unmarshal(raw, &external); err != nil {
+			return contracts.Reference{}, err
+		}
+		if external.ID != id || external.Version != 1 || external.Policy != "external" {
+			return contracts.Reference{}, errors.New("invalid external agent identity")
+		}
+		return contracts.Reference{ID: id, Version: 1, SHA256: fmt.Sprintf("%x", sha256.Sum256(raw)), Content: raw}, nil
+	}
 	if err = validateAsset("AgentConfiguration", raw); err != nil {
 		return contracts.Reference{}, err
 	}
@@ -283,14 +307,26 @@ func (s *Server) createBenchmark(w http.ResponseWriter, r *http.Request) {
 		problem(w, 400, "unknown or invalid model configuration")
 		return
 	}
-	if input.DatasetVersion == 6 && input.AgentID != "support-interaction-safe" || input.DatasetVersion != 6 && input.AgentID == "support-interaction-safe" {
+	var selectedAgent struct {
+		Policy string `json:"policy"`
+	}
+	_ = json.Unmarshal(agent.Content, &selectedAgent)
+	if input.DatasetVersion == 6 && input.AgentID != "support-interaction-safe" || input.DatasetVersion != 6 && input.AgentID == "support-interaction-safe" || input.DatasetVersion == 6 && selectedAgent.Policy == "external" {
 		problem(w, 400, "agent and dataset versions are incompatible")
 		return
 	}
-	if input.DatasetVersion == 6 {
+	if input.DatasetVersion == 6 && input.AgentID == "support-interaction-safe" {
 		err = validateInteractionAsset("InteractionAgentConfiguration", agent.Content)
 	} else {
-		err = validateAsset("AgentConfiguration", agent.Content)
+		var agentSchema struct {
+			SchemaVersion string `json:"schema_version"`
+		}
+		_ = json.Unmarshal(agent.Content, &agentSchema)
+		if agentSchema.SchemaVersion == "3.0" {
+			err = validateInteractionAsset("AgentConfiguration", agent.Content)
+		} else {
+			err = validateAsset("AgentConfiguration", agent.Content)
+		}
 	}
 	if err != nil {
 		problem(w, 500, "invalid agent asset")
@@ -419,6 +455,15 @@ func (s *Server) createBenchmark(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	trace.SpanFromContext(r.Context()).SetAttributes(attribute.String("agentproof.run_id", id.String()), attribute.String("agentproof.dataset.id", dataset.ID), attribute.Int("agentproof.dataset.version", dataset.Version))
+	if starter, ok := s.Starter.(interface {
+		StartBenchmark(context.Context, string) error
+	}); ok {
+		dispatchCtx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		if dispatchErr := starter.StartBenchmark(dispatchCtx, id.String()); dispatchErr != nil {
+			slog.Warn("benchmark start deferred to durable dispatcher", "error_type", fmt.Sprintf("%T", dispatchErr))
+		}
+		cancel()
+	}
 	w.Header().Set("Location", "/api/v2/evaluations/"+id.String())
 	respond(w, 202, map[string]string{"id": id.String(), "status": "queued"})
 }
@@ -544,7 +589,11 @@ func (s *Server) inspectTrial(w http.ResponseWriter, r *http.Request) {
 	respond(w, 200, map[string]any{"schema_version": "2.0", "trial_id": id, "scenario": scenario, "result": result, "events": events})
 }
 func (t TemporalStarter) StartBenchmark(ctx context.Context, id string) error {
-	_, err := t.Client.ExecuteWorkflow(ctx, client.StartWorkflowOptions{ID: "benchmark-" + id, TaskQueue: "agentproof-v1", WorkflowIDReusePolicy: enums.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE}, "BenchmarkWorkflow", id)
+	queue := os.Getenv("AGENTPROOF_TASK_QUEUE")
+	if queue == "" {
+		queue = "agentproof-v1"
+	}
+	_, err := t.Client.ExecuteWorkflow(ctx, client.StartWorkflowOptions{ID: "benchmark-" + id, TaskQueue: queue, WorkflowIDReusePolicy: enums.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE}, "BenchmarkWorkflow", id)
 	var already *serviceerror.WorkflowExecutionAlreadyStarted
 	if errors.As(err, &already) {
 		return nil
