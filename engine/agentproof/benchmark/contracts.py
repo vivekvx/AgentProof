@@ -255,6 +255,70 @@ class AgentConfiguration(Identity):
             raise ValueError("only the offline reference model is supported")
         return self
 
+    @property
+    def execution_mode(self):
+        return self.policy
+
+
+class ExternalSessionConfiguration(Contract):
+    """Bounds for a future, explicitly transport-driven external agent session."""
+
+    execution_mode: Literal["external"]
+    transport: Literal["http-json"]
+    session_ttl_seconds: int = Field(ge=1, le=600)
+    credential_scope: Literal["single-trial"]
+
+
+class AgentConfigurationV3(Identity):
+    schema_version: Literal["3.0"] = "3.0"
+    title: str
+    policy: Literal["reconcile", "blind-retry", "llm", "external"]
+    model_configuration: ModelConfiguration | dict[str, Any]
+    prompt: str = Field(min_length=20, max_length=2000)
+    prompt_version: str = Field(pattern=r"^[a-z][a-z0-9-]{1,63}$")
+    tool_schema_version: Literal["support-tools-v1"]
+    max_retries: int = Field(ge=0, le=3)
+    external_session: ExternalSessionConfiguration | None = None
+
+    @model_validator(mode="after")
+    def execution_configuration(self):
+        if self.policy == "external":
+            if self.external_session is None:
+                raise ValueError("external policy requires external_session")
+            if self.model_configuration != {
+                "provider": "offline",
+                "model": "external-agent",
+                "external_calls": False,
+            }:
+                raise ValueError("external policy cannot use model provider settings")
+        elif self.external_session is not None:
+            raise ValueError("external_session requires external policy")
+        elif self.policy == "llm":
+            self.model_configuration = ModelConfiguration.model_validate(
+                self.model_configuration
+            )
+        elif self.model_configuration != {
+            "provider": "offline",
+            "model": "pydantic-function-model",
+            "external_calls": False,
+        }:
+            raise ValueError("only the offline reference model is supported")
+        return self
+
+    @property
+    def execution_mode(self):
+        return "external" if self.policy == "external" else self.policy
+
+
+def parse_agent_configuration(value: dict[str, Any]):
+    """Dispatch by serialized contract version; never reinterpret old policy values."""
+    version = value.get("schema_version")
+    if version == "2.0":
+        return AgentConfiguration.model_validate(value)
+    if version == "3.0":
+        return AgentConfigurationV3.model_validate(value)
+    raise ValueError("unsupported agent configuration version")
+
 
 class PublicContext(Contract):
     """The only task data supplied to tested agent code."""

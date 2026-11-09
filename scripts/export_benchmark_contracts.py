@@ -21,3 +21,9 @@ for name in [
     (root / (name + ".schema.json")).write_text(
         json.dumps(getattr(contracts, name).model_json_schema(), indent=2) + "\n"
     )
+
+v3 = root.parent / "v3"
+v3.mkdir(exist_ok=True)
+(v3 / "AgentConfiguration.schema.json").write_text(
+    json.dumps(contracts.AgentConfigurationV3.model_json_schema(), indent=2) + "\n"
+)

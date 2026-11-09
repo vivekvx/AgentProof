@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "agentproof.agent-outcome.v1",
+  "type": "object", "additionalProperties": false,
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "run_id": {"type": "string", "format": "uuid"},
+    "trial_id": {"type": "string", "format": "uuid"},
+    "last_sequence": {"type": "integer", "minimum": 0, "maximum": 32},
+    "resolution": {"enum": ["completed", "refused", "blocked", "unknown"]},
+    "message": {"type": "string", "maxLength": 2000},
+    "error_code": {"enum": ["deadline_exceeded", "cancelled", "unavailable", "malformed_request", "internal_error"]}
+  },
+  "required": ["schema_version", "run_id", "trial_id", "last_sequence", "resolution"],
+  "not": {"required": ["error_code", "message"]}
+}

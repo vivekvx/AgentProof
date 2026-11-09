@@ -1,0 +1,265 @@
+{
+  "$defs": {
+    "ExternalSessionConfiguration": {
+      "additionalProperties": false,
+      "description": "Bounds for a future, explicitly transport-driven external agent session.",
+      "properties": {
+        "schema_version": {
+          "const": "2.0",
+          "default": "2.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "execution_mode": {
+          "const": "external",
+          "title": "Execution Mode",
+          "type": "string"
+        },
+        "transport": {
+          "const": "http-json",
+          "title": "Transport",
+          "type": "string"
+        },
+        "session_ttl_seconds": {
+          "maximum": 600,
+          "minimum": 1,
+          "title": "Session Ttl Seconds",
+          "type": "integer"
+        },
+        "credential_scope": {
+          "const": "single-trial",
+          "title": "Credential Scope",
+          "type": "string"
+        }
+      },
+      "required": [
+        "execution_mode",
+        "transport",
+        "session_ttl_seconds",
+        "credential_scope"
+      ],
+      "title": "ExternalSessionConfiguration",
+      "type": "object"
+    },
+    "ModelConfiguration": {
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": "2.0",
+          "default": "2.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "provider": {
+          "const": "openai-compatible",
+          "title": "Provider",
+          "type": "string"
+        },
+        "model": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Model",
+          "type": "string"
+        },
+        "base_url": {
+          "pattern": "^https?://[^?#@]+$",
+          "title": "Base Url",
+          "type": "string"
+        },
+        "api_key_env": {
+          "pattern": "^[A-Z][A-Z0-9_]{1,100}$",
+          "title": "Api Key Env",
+          "type": "string"
+        },
+        "tool_calling": {
+          "const": true,
+          "title": "Tool Calling",
+          "type": "boolean"
+        },
+        "timeout_seconds": {
+          "default": 10.0,
+          "exclusiveMinimum": 0,
+          "maximum": 30,
+          "title": "Timeout Seconds",
+          "type": "number"
+        },
+        "temperature": {
+          "default": 0.0,
+          "maximum": 2,
+          "minimum": 0,
+          "title": "Temperature",
+          "type": "number"
+        },
+        "top_p": {
+          "default": 1.0,
+          "exclusiveMinimum": 0,
+          "maximum": 1,
+          "title": "Top P",
+          "type": "number"
+        },
+        "max_output_tokens": {
+          "default": 256,
+          "maximum": 4096,
+          "minimum": 16,
+          "title": "Max Output Tokens",
+          "type": "integer"
+        },
+        "max_requests": {
+          "default": 4,
+          "maximum": 20,
+          "minimum": 1,
+          "title": "Max Requests",
+          "type": "integer"
+        },
+        "max_tool_calls": {
+          "default": 10,
+          "maximum": 32,
+          "minimum": 1,
+          "title": "Max Tool Calls",
+          "type": "integer"
+        },
+        "max_tokens": {
+          "default": 64000,
+          "maximum": 100000,
+          "minimum": 128,
+          "title": "Max Tokens",
+          "type": "integer"
+        },
+        "max_estimated_cost_usd": {
+          "default": 0.01,
+          "exclusiveMinimum": 0,
+          "maximum": 5,
+          "title": "Max Estimated Cost Usd",
+          "type": "number"
+        },
+        "input_usd_per_million": {
+          "exclusiveMinimum": 0,
+          "maximum": 1000,
+          "title": "Input Usd Per Million",
+          "type": "number"
+        },
+        "output_usd_per_million": {
+          "exclusiveMinimum": 0,
+          "maximum": 10000,
+          "title": "Output Usd Per Million",
+          "type": "number"
+        },
+        "pricing_source": {
+          "maxLength": 500,
+          "pattern": "^https://",
+          "title": "Pricing Source",
+          "type": "string"
+        },
+        "pricing_checked_at": {
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+          "title": "Pricing Checked At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "provider",
+        "model",
+        "base_url",
+        "api_key_env",
+        "tool_calling",
+        "input_usd_per_million",
+        "output_usd_per_million",
+        "pricing_source",
+        "pricing_checked_at"
+      ],
+      "title": "ModelConfiguration",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "3.0",
+      "default": "3.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "id": {
+      "pattern": "^[a-z][a-z0-9-]{1,63}$",
+      "title": "Id",
+      "type": "string"
+    },
+    "version": {
+      "minimum": 1,
+      "title": "Version",
+      "type": "integer"
+    },
+    "title": {
+      "title": "Title",
+      "type": "string"
+    },
+    "policy": {
+      "enum": [
+        "reconcile",
+        "blind-retry",
+        "llm",
+        "external"
+      ],
+      "title": "Policy",
+      "type": "string"
+    },
+    "model_configuration": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ModelConfiguration"
+        },
+        {
+          "additionalProperties": true,
+          "type": "object"
+        }
+      ],
+      "title": "Model Configuration"
+    },
+    "prompt": {
+      "maxLength": 2000,
+      "minLength": 20,
+      "title": "Prompt",
+      "type": "string"
+    },
+    "prompt_version": {
+      "pattern": "^[a-z][a-z0-9-]{1,63}$",
+      "title": "Prompt Version",
+      "type": "string"
+    },
+    "tool_schema_version": {
+      "const": "support-tools-v1",
+      "title": "Tool Schema Version",
+      "type": "string"
+    },
+    "max_retries": {
+      "maximum": 3,
+      "minimum": 0,
+      "title": "Max Retries",
+      "type": "integer"
+    },
+    "external_session": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ExternalSessionConfiguration"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    }
+  },
+  "required": [
+    "id",
+    "version",
+    "title",
+    "policy",
+    "model_configuration",
+    "prompt",
+    "prompt_version",
+    "tool_schema_version",
+    "max_retries"
+  ],
+  "title": "AgentConfigurationV3",
+  "type": "object"
+}
