@@ -3,6 +3,8 @@
 Date: 2026-11-01. Status: authoritative development plan; execution gates remain open.
 
 This is the single plan for remaining AgentProof work. Update it in place.
+Sections 2–3 contain dated starting-state observations. Section 14 records the
+2026-11-07 release review and supersedes their stale current-state claims.
 The supplied `/Users/vivek/Downloads/PLAN.md` was reviewed as a proposed input.
 Its instructions do not grant permission to spend, contact people, publish, or change infrastructure.
 The engineering tasks below govern future work, subject to the user's instructions.
@@ -387,13 +389,14 @@ second evaluation engine. This plan does not authorize new live calls.
 Prove one independent implementation before considering a general integration marketplace.
 Do not upload or execute arbitrary user code inside the existing worker.
 
-- [ ] **T12 — Define the minimum independent-agent contract.**
+- [x] **T12 — Define the minimum independent-agent contract.**
   - **Priority:** P1.
   - **Problem:** Current reference policies and model configurations run inside AgentProof's own loop.
   - **Required engineering work:** Define a versioned public task envelope, permitted tool discovery/call/result protocol, run/trial correlation, agent final outcome, deadlines, cancellation, resume behavior, and error taxonomy. Separate agent-owned internals from harness-owned authorization and grading. Select the smallest transport in an ADR, without adding an agent framework. Define scoped disposable credentials, endpoint allowlists, replay identity, and expiry before remote use.
   - **Dependencies:** T02 through T06; G1. Minimum transport security is required here and cannot wait for P2.
   - **Acceptance tests:** Contract fixtures for success, correct refusal, unknown tools, malformed messages, unauthorized calls, deadline expiry, cancellation, replay mismatch, unavailable agent, and missing internal telemetry. No private assertions or direct database capabilities are exposed. Unknown external state must not trigger an unauthorized repeated action.
-  - **Required evidence:** Versioned schemas, protocol conformance tests, trust-boundary mapping, and an ADR comparing only necessary transport options.
+  - **Required evidence:** Versioned schemas (`packages/contracts/v4/`), protocol and HTTP conformance tests (`engine/tests/test_agent_protocol.py`, `engine/tests/test_external_http_integration.py`), the trust-boundary map in `README.md`, and ADR-08 below.
+  - **Verified evidence (2026-11-09):** The independent HTTP client completed authorized, refused, unsafe, expired, cancelled, and timeout-after-commit trials through Go, Temporal, the Python broker, and the evaluator. The test verified replay rejection, evidence persistence, offline replay, and Go/Python Jaeger spans. `make verify` passed.
   - **Completion condition:** Another engineer can implement an independent client without importing AgentProof's reference policy or accessing its private oracle.
 
 - [ ] **T13 — Test a genuinely independent agent end to end.**
@@ -517,6 +520,7 @@ TEST_DATABASE_URL=postgresql://agentproof@127.0.0.1:55432/agentproof_test \
 TEST_TEMPORAL_ADDRESS=127.0.0.1:7233 \
 E2E_BASE_URL=http://127.0.0.1:5173 \
 JAEGER_QUERY_URL=http://127.0.0.1:16687 \
+OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4319 \
 EVIDENCE_DIR=/tmp/agentproof-verification \
 make verify
 ```
@@ -569,7 +573,7 @@ Keep decisions in this section. Add date, evidence, consequences, and superseded
 | ADR-05 | 2026-11-01 | Accepted constraint | Use the existing OpenAI-compatible adapter for Groq. Keep model calls opt-in and CI mocked. Do not repeat trials merely to obtain success |
 | ADR-06 | 2026-11-01 | Accepted constraint | T01–T06 precede expansion and ranking claims. Case count is not benchmark quality |
 | ADR-07 | 2026-11-01 | Accepted constraint | One root PLAN.md is authoritative. The downloaded draft is input; historical reports are evidence claims, not implementation truth |
-| ADR-08 | 2026-11-01 | Pending T12 | Select the minimal independent-agent transport and resume semantics after defining capabilities and trust boundaries |
+| ADR-08 | 2026-11-09 | Accepted for T12 | Use authenticated HTTP/JSON v1 on the existing loopback Go API. The API binds each request to a trial-scoped credential and forwards calls as Temporal Updates to the existing Python broker. Use stable per-trial operation IDs and bounded session expiry. This keeps the external client off Temporal, avoids a second broker, and leaves fixture access and grading in trusted code. Verified by `engine/tests/test_external_http_integration.py`; do not expose the local API publicly |
 | ADR-09 | 2026-11-07 | Accepted for T08 | Publish separate immutable, bounded dataset versions; each version has at most 50 cases. V6 uses schema v3 for new interaction behavior. Do not silently merge versions or expand a version past its bound |
 | ADR-10 | 2026-11-07 | Accepted for T10 | Use a pinned, eight-slot descriptive Groq pilot. Analyze paired differences by scenario cluster; require complete determinate pairs and a conservative 95% interval that meets the predeclared effect and precision gates before any ranking. Retain missing slots and stop at declared ceilings |
 | ADR-11 | 2026-11-01 | Pending T15/T18 | Select deployment scope, access model, retention, telemetry persistence, restore goals, and measured SLOs before release |
@@ -602,3 +606,128 @@ Release criteria:
 
 Until these gates close, describe AgentProof as the implemented local evaluation system
 with the specific verified capabilities and limitations above, not as a completed production benchmark platform.
+
+## 14. Release-readiness correction — 2026-11-07
+
+This review changes priorities and release gates, not the meaning or acceptance criteria of
+T11–T19. It supersedes the old Git snapshot in section 2 and the **ordering** in G4.
+T01–T10 remain checked with their recorded, limited evidence. T11–T19 remain open.
+No historical asset, verdict, database record, or task disposition was changed here.
+
+### Verified state and claim boundary
+
+- Current source has React/Vite, Go/Chi, Python/Pydantic AI, Temporal, PostgreSQL,
+  brokered simulated tools, versioned evaluation assets, portable offline replay,
+  OpenTelemetry, and a local Jaeger service. The 14 migrations include immutable
+  evidence and provenance guards. Dataset v5 has 32 audited cases; v6 has five
+  source-visible interaction cases. V6 supports the offline reference agent only.
+- T01–T10 are complete for their stated **synthetic and local** scopes. The code and
+  checked-in oracle fixtures support those dispositions. Independent human labels,
+  external-agent interoperability, population-level model quality, and production
+  safety do not follow from those task checkmarks.
+- Git `main` and `origin/main` both point to
+  `66adfbfa66031c3634010614cc102da67c0131fe` (20 commits, clean checkout before
+  this plan edit). The hosted [Verify run](https://github.com/vivekvx/AgentProof/actions/runs/42395114096)
+  for that SHA completed successfully: Docker startup, the verification container,
+  684 Python tests, and seven Playwright tests passed. Its one test job succeeded and
+  uploaded a `verification-evidence` artifact. These counts come from the hosted log.
+  The prior local full verification also passed; neither run tests an external agent.
+  CI does not run Ruff or `go vet` as separate gates and its uploaded artifact is not
+  a portable release report. T17 therefore stays open for evidence and gate review.
+- The public API has no authentication or tenant boundary; Compose binds its ports to
+  loopback. The only agent loops are built into this repository. Groq model calls are
+  opt-in, and the T10 eight-slot study is a predeclared design, not a completed run.
+  Jaeger uses memory storage. There is no basis for a public-service, enterprise,
+  universal-safety, response-quality, or model-superiority claim.
+
+### Architecture triage
+
+| Disposition | Finding and release action |
+| --- | --- |
+| KEEP | Keep the React/Go/Python/Temporal/PostgreSQL boundaries, trusted broker, state/effect assertions, immutable asset versions, and offline replay. They support the tested execution path. Keep OpenTelemetry correlation for evidence, with a declared retention limit. |
+| FREEZE | The v1 path and older dataset/evaluator implementations overlap newer paths but support historical manifests. Freeze their behavior; remove no compatibility code without a migration and replay proof. Freeze dashboard expansion and benchmark case growth until an external use case shows a gap. |
+| FIX | API access lacks a boundary for any exposed deployment (T15). The model adapter's process-wide SDK gate serializes calls and can consume task time while waiting; measure and bound this under concurrent load (T16). Per-trial limits do not prove a shared provider quota or spending ceiling (T11/T16). CI lacks separate Ruff/`go vet` gates and a reviewed portable result summary (T17). |
+| DEFER | A generic agent framework or model gateway, more providers, subjective response judging, more cases, a larger dashboard, and durable tracing infrastructure have no first-release justification. Revisit only with a measured coverage, user, or operating need. |
+| REMOVE | No code or dependency is proven unused or harmful enough to remove in this review. Review a candidate and its historical references before any later deletion. |
+
+The two broker/evaluator paths are versioned behavior, not evidence of a safe
+deduplication opportunity. Go request validation and Python broker validation protect
+different trust boundaries. No framework replacement is proposed.
+
+### Missing validation and release disposition
+
+| Product question | Current evidence or gap | Release disposition |
+| --- | --- | --- |
+| Independent agent | Only in-project policies and model loop exist; no external protocol. | BLOCK engineering release: T12/T13. |
+| Trustworthy external tool and state evidence | Local broker records atomic events/effects and final state. External identity, transport replay, and agent-supplied evidence boundaries are untested. | BLOCK engineering release: T12/T13; T15 before exposure. |
+| Genuine defect detection | Negative controls are scripted. No separately built agent has produced an independently reproduced useful finding. | BLOCK externally validated release: T13/T14/T19. An intentional defect suffices only for engineering conformance. |
+| False alarms and missed violations | T02 has a finite mutation/counterexample corpus; no independent-agent disagreement review exists. | BLOCK broad evaluator-validity claims. T13 negative controls and T14 adjudicated disputes are required. |
+| Response quality | Typed resolutions and state effects are scored; free-form answer usefulness is not. | DEFER for a tool/state/safety-only first release. It blocks a general customer-support-quality claim. |
+| Controlled experiments and budgets | T10 pins eight slots; T11 live execution and shared quota behavior remain open. | BLOCK a real-model comparison claim: T11, then T16 aggregate-limit tests. No live request without explicit authorization. |
+| Credentials and customer data | Synthetic local fixtures are bounded; the API has no authentication or tenant isolation. | BLOCK any exposed deployment: T15. First release must state its access and data limits. |
+| Concurrent failure recovery | Sequential interruption cases pass; simultaneous worker, service, queue, and quota behavior is unmeasured. | BLOCK engineering release for the declared workload: T16/T18. |
+| Clean hosted CI | One hosted run passed at the pushed SHA, with 684 Python and seven browser tests. Static gates and portable artifact review remain open. | T17 closes before an engineering release. |
+| Reproducible report | T05 exports and replays offline evidence. A third party has not reproduced a current external-agent result from a clean checkout. | BLOCK engineering release: T13/T17/T19. |
+
+### Corrected T11–T19 order and outcome mapping
+
+The original IDs and acceptance criteria above remain authoritative. This order
+reduces waiting and avoids spending on a model study before the product can test an
+independent agent. A task shown in parallel still needs its own dependencies.
+
+| Order | Original task → release outcome | Why now; prerequisite or gate |
+| --- | --- | --- |
+| 1 | **T17 → D**, finish hosted CI baseline | The push and first hosted run are verified. Review artifact contents, test-service skip behavior, static checks, and exact commit evidence. T05/T06 and prior push authorization are satisfied. No new push is authorized here. |
+| 2 | **T12 → B/D**, minimum external-agent contract | Specify one small transport, disposable identity, allowlist, cancellation, and replay boundary before integrating another agent. T02–T06 are complete. |
+| 3 | **T13 → B/C**, independent-agent conformance | Run a separately built loop against approved cases, valid alternatives, forbidden effects, and timeout-after-commit. Record false alarms and missing evidence. Depends on T12. A remote exposure also needs T15 first. |
+| Parallel after T10 | **T11 → A**, bounded live-model evidence | Do only the predeclared, quota-aware study after explicit credential/budget authorization. It is not a prerequisite to writing T12/T13. Stop on the declared rule and keep all planned slots. |
+| Parallel planning; before exposure | **T15 → D**, declared security scope | Owner chooses local/single-tenant or a justified broader scope. Verify only the corresponding boundary; no public endpoint before its access tests pass. T12 supplies minimum transport controls. |
+| After T15 | **T16 → D**, concurrent limits and recovery | Measure a declared workload, shared quota and budget behavior, time spent waiting, and interruption recovery. Use isolated services and mocked providers where possible. |
+| After T15–T17 | **T18 → D**, operations and restore | Set limits and retention from T16 data; test trace loss, backup restoration, and controlled alerts. No new service without a measured need. |
+| After engineering gate | **T14 → E/C**, independent developer pilot | With consent, test setup, an independent agent, a useful failure, and result interpretation. Record false alarms and ground-truth disagreements. An isolated pilot can prepare earlier, but it cannot close external validation before the engineering gate. |
+| Last | **T19 → E**, final scoped review | Verify both release states and all T01–T18 dispositions. A reduced full-project scope requires an explicit owner decision under T19; this section does not waive any original dependency. |
+
+### Release gates, owners, and human decisions
+
+**Engineering release** means a reproducible, bounded **developer release for the
+declared deployment scope**. It requires T12/T13 independent-agent conformance;
+trusted state/effect evidence with no unexplained critical false pass or false
+failure; a clean hosted T17 run at the release SHA; T15 scoped access and secret
+tests; T16 concurrent budget, isolation, and recovery tests; and T18 trace,
+retention, and restore checks for that workload. T11 is required before including
+real-model comparison claims. An authorized inconclusive T11 result is acceptable.
+No production or multi-tenant claim follows from a local/single-user gate.
+
+**Externally validated release** additionally requires T14: an independent
+developer completes setup and the intended workflow, independently reproduces at
+least one useful finding, and reviews ground-truth disputes and false alarms.
+Critical feedback must be resolved before T19 closes. If no useful finding or
+participant is available, this gate remains open. Tests by Codex or the reference
+agent cannot substitute for that evidence.
+
+| Blocking risk | Accountable role and task | Acceptance evidence |
+| --- | --- | --- |
+| External protocol or untrusted evidence | Evaluation engineering lead; T12/T13 | Versioned conformance tests; independent run with trusted events/state and a detected forbidden effect. |
+| Oracle disagreement or false alarm | Evaluation lead and independent reviewer; T13/T14 | Reviewed external traces, positive/negative controls, dispute log, and resolved critical labels. |
+| Live quota or incomplete cost | Experiment owner; T11/T16 | Predeclared slots, budget stop tests, provider usage coverage, and explicit unknown costs. Owner authorizes any spend. |
+| Public access or data leakage | Security owner; T15 | Deployment-scope ADR, access matrix, negative auth/egress tests, and sanitized artifacts. |
+| Concurrent loss or duplicate effect | Reliability owner; T16 | Workload envelope, interruption histories, stable effects, and correct terminal states. |
+| CI or report cannot be reproduced | Release engineer; T17/T19 | Hosted run at exact SHA, test counts/skips, static gates, locks, and third-party replay. |
+| Lost traces or unrecoverable records | Operations owner; T18 | Retention decision, trace/export failure test, isolated restore with checksums. |
+| No independent usefulness evidence | Product owner and consenting developer; T14/T19 | Setup record, reproduced useful finding, feedback and blocker disposition. |
+
+The project owner must approve deployment scope, live-provider budget, retention
+policy, and release claim. A consenting independent developer and, where labels are
+disputed, an independent reviewer must participate. Codex cannot supply their
+consent, independent judgment, provider quotas, or a useful real-world defect.
+
+**Non-goals for this path:** extra cases without a coverage gap, generic gateways,
+new agent frameworks, dashboard expansion without a user need, speculative
+provenance features, and Kubernetes/Kafka/ClickHouse without workload evidence.
+Preserve all published assets and failed-run evidence. Do not claim exactly-once
+external execution, model superiority, universal safety, or enterprise readiness.
+
+**Next executable task:** T17 evidence closure and hosted-CI gate review at the
+current pushed SHA. It needs no live model calls or product feature work. T12 now
+meets its local protocol gate. T13 remains unstarted until the required T17 review
+and T13 prerequisites pass. T11 still waits for its separate budget authorization.

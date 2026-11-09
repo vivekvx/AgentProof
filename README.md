@@ -140,6 +140,43 @@ Real-model comparisons also report `experiment_eligible` and mismatch reasons fo
 the prompt, trial count, split, effective settings, and resource budgets. A displayed
 paired delta remains descriptive and is not a model ranking.
 
+## External agents
+
+The external-agent protocol uses HTTP/JSON v1 through the existing Go API. It runs
+only against the local, single-tenant development setup. Do not expose this API on a
+public network. Create a v3 `AgentConfiguration` with `policy: "external"` and an
+`external_session` object. Use the published v3 and v4 JSON Schemas. External sessions
+do not use model credentials or a bundled agent loop.
+
+The control client creates an evaluation through `POST /api/v2/evaluations`, then
+requests a trial session with `POST /api/v2/external/sessions/TRIAL_ID` and its
+control-plane bearer token. The response contains a public task and a trial-scoped
+credential. Keep this credential out of logs. The task contains the request, permitted
+tool schemas, limits, trial identity, attempt, deadline, and `resume_token`. It does not
+contain fixture state, private assertions, or evaluator data.
+
+The external client sends versioned tool calls to
+`POST /agent/v1/sessions/TRIAL_ID/tools`. Each call includes `run_id`, `trial_id`, a
+sequence, a UUID `operation_id`, a tool name, and arguments. Send the session credential
+as a bearer token. Retry a transport failure only with the same operation ID and the
+same request. A changed replay receives `replay_mismatch`. Tool results use fixed error
+codes from `packages/contracts/v4/AgentToolResult.schema.json`.
+
+Send a final `AgentOutcome` to `POST /agent/v1/sessions/TRIAL_ID/complete`. Use
+`DELETE /agent/v1/sessions/TRIAL_ID` to cancel. Read the deterministic result and trusted
+events with `GET /agent/v1/sessions/TRIAL_ID`. The harness records tool attempts and
+side effects. It evaluates stored fixture state and evidence. It does not trust an
+agent's claimed verdict. Expiry and cancellation cannot create a PASS.
+
+The trust boundary is explicit: the API authenticates the control client and issues a
+scoped token; the API checks token, run, trial, attempt, deadline, message bounds, and
+replay identity; Temporal binds updates to the active workflow; the Python broker checks
+the active session and scenario permissions; the simulator alone applies tool effects;
+the evaluator alone assigns a verdict. Temporal stores no session token. The database
+stores only a token hash. The agent supplies requests and an outcome claim, not authority,
+fixture state, evidence, or a verdict. A workflow or worker failure leaves the trial
+incomplete until trusted evidence permits finalization.
+
 The predeclared Groq study is `packages/contracts/experiments/groq-gpt-oss-matched.v1.json`.
 It pins two development scenarios, two trials per model per scenario, asset and
 profile hashes, equal execution limits, a maximum of 48 model requests, 80 tool
