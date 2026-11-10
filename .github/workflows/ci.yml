@@ -14,7 +14,11 @@ jobs:
           commit_tree=$(git rev-parse "${GITHUB_SHA}^{tree}")
           echo "CI_COMMIT_TREE=$commit_tree" >> "$GITHUB_ENV"
       - name: Generate ephemeral API token
-        run: echo "AGENTPROOF_API_TOKEN=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
+        run: |
+          api_token=$(openssl rand -hex 32)
+          echo "::add-mask::$api_token"
+          echo "AGENTPROOF_API_TOKEN=$api_token" >> "$GITHUB_ENV"
+          unset api_token
       - run: mkdir -p .local/verification
       - run: docker compose up -d --build --wait
       - run: docker compose --profile verification build verify
