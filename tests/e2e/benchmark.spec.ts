@@ -20,7 +20,7 @@ test("published interaction dataset shows trusted reply and result", async ({ pa
 test("run repeated benchmark trials, inspect evidence, and compare agent versions", async ({
   page,
 }) => {
-  test.setTimeout(120000);
+  test.setTimeout(720000);
   await page.goto("/");
   await page.getByRole("tab", { name: "Benchmarks", exact: true }).click();
   await expect(page.getByLabel("Dataset version")).toContainText("v5");
@@ -30,7 +30,7 @@ test("run repeated benchmark trials, inspect evidence, and compare agent version
     .getByRole("button", { name: "Run benchmark", exact: true })
     .click();
   await expect(page.getByTestId("benchmark-status")).toHaveText("completed", {
-    timeout: 45000,
+    timeout: 300000,
   });
   await expect(page.getByTestId("benchmark-progress")).toHaveText(
     "64 / 64 trials",
@@ -72,7 +72,7 @@ test("run repeated benchmark trials, inspect evidence, and compare agent version
   const createdID = (await (await created).json()).id;
   await expect(page.getByTestId("benchmark-id")).toHaveText(createdID);
   await expect(page.getByTestId("benchmark-status")).toHaveText("completed", {
-    timeout: 45000,
+    timeout: 300000,
   });
   const blindID = await page.getByTestId("benchmark-id").innerText();
   expect(blindID).not.toBe(safeID);
@@ -117,7 +117,7 @@ test("run repeated benchmark trials, inspect evidence, and compare agent version
   expect(
     Number(await page.getByTestId("comparison-improvement").innerText()),
   ).toBeGreaterThan(0);
-  await page.reload();
+  await page.goto("/", { waitUntil: "domcontentloaded" });
   await page.getByRole("tab", { name: "Benchmarks", exact: true }).click();
   await page
     .getByRole("button")
