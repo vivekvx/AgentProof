@@ -15,10 +15,10 @@ def main():
     log_path = Path(sys.argv[1])
     log = log_path.read_text()
     python_result = re.search(
-        r"(?m)^(\d+) passed(?:, (\d+) skipped)?(?:, (\d+) failed)? in ([^\n]+)$",
+        r"(?m)^((?:\d+ (?:passed|failed|skipped|warning|warnings)(?:, )?)+) in ([^\n]+)$",
         log,
     )
-    browser_result = re.search(r"(?m)^(\d+) passed \(([^\n]+)\)$", log)
+    browser_result = re.search(r"(?m)^[ \t]*(\d+) passed \(([^\n]+)\)$", log)
     node_result = {
         name: re.search(rf"(?m)^ℹ {name} (\d+)$", log)
         for name in ("tests", "pass", "fail", "skipped")
@@ -27,6 +27,17 @@ def main():
         raise SystemExit(
             "verification log is missing pytest, Playwright, or Node test totals"
         )
+
+    python_summary = python_result.group(1)
+
+    def python_count(name):
+        match = re.search(rf"\b(\d+) {name}\b", python_summary)
+        return int(match.group(1)) if match else 0
+
+    python_passed = python_count("passed")
+    python_skipped = python_count("skipped")
+    python_failed = python_count("failed")
+    python_warnings = python_count("warning") + python_count("warnings")
 
     commit = os.getenv("CI_COMMIT_SHA")
     tree = os.getenv("CI_COMMIT_TREE")
@@ -109,9 +120,10 @@ def main():
         },
         "dependency_lock_sha256": lock_hashes,
         "python": {
-            "passed": int(python_result.group(1)),
-            "skipped": int(python_result.group(2) or 0),
-            "failed": int(python_result.group(3) or 0),
+            "passed": python_passed,
+            "skipped": python_skipped,
+            "failed": python_failed,
+            "warnings": python_warnings,
         },
         "go_test_packages_passed": go_packages,
         "playwright": {"passed": int(browser_result.group(1))},
