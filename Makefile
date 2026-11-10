@@ -36,8 +36,8 @@ test-e2e:
 	node --test apps/web/test/proxy-auth.test.mjs
 test: test-unit test-e2e
 lint:
-	uvx --from ruff ruff check engine/agentproof engine/tests scripts
-	uvx --from ruff ruff format --check engine/agentproof engine/tests scripts
+	uv tool run --from ruff==0.17.4 ruff check engine/agentproof engine/tests scripts
+	uv tool run --from ruff==0.17.4 ruff format --check engine/agentproof engine/tests scripts
 	uv run --project engine --frozen python scripts/check_contract_schemas.py
 	go vet ./...
 verify: lint build test-integration test-e2e
