@@ -440,7 +440,7 @@ Keep production engineering proportional to an explicit deployment scope.
   - **Required evidence:** Workload definition, observed throughput/latency/resource distributions, queue delays, quota observations, interruption histories, final database assertions, and known capacity limits.
   - **Completion condition:** Measured behavior meets the predeclared workload criteria without unexplained state loss, duplicate effects, or false agent failures caused by platform waiting. No exactly-once external execution claim is made.
 
-- [ ] **T17 — Establish an authorized Git baseline and verify hosted CI.**
+- [x] **T17 — Establish an authorized Git baseline and verify hosted CI.**
   - **Priority:** P2 release gate; baseline provenance work begins in T05.
   - **Problem:** Local logs and a CI YAML file do not prove a hosted run or a recoverable committed source baseline.
   - **Required engineering work:** After explicit authorization, create/review the source baseline and push it to the intended remote. Verify GitHub Actions against that exact commit. Keep ordinary CI fully mocked and credential-free. Confirm locks, schema generation checks, browser builds, service dependencies, and artifact handling in a clean environment.
@@ -448,6 +448,7 @@ Keep production engineering proportional to an explicit deployment scope.
   - **Acceptance tests:** Existing plus new correctness, contract, property, integration, recovery, and browser checks run without service-test skips. Missing test-service variables must fail the full verification command. Secret scans pass. Hosted artifacts identify the exact commit and include actual job outcomes.
   - **Required evidence:** Commit/tree identity, hosted job URL and status, test counts, dependency locks, build identifiers, and retained sanitized artifacts.
   - **Completion condition:** A real hosted run passes for the approved baseline. Local execution of equivalent commands is labeled local and cannot close this gate.
+  - **Verified closure:** Authorized push of `b2dcccb2a072b185026c566f3506c90dde15d004` (tree `39b6dd6474e42bb63f86a2f660dd7dde4c2b9bc2`) passed [hosted Verify run 42845647388](https://github.com/vivekvx/AgentProof/actions/runs/42845647388). Its retained `verification-evidence` artifact (ID `13777688268`, SHA-256 `f8a8ace1af9b01f637edf140fc404d174fc32eb5813955d3d74e43a3b8e8d9a0`) identifies that commit and tree. Hosted results: Ruff and format checks, 21 generated and 4 protocol schema checks, `go vet`, Go and Vite builds, one Go test package, 714 Python tests, seven Playwright tests, and one Node proxy test passed; zero tests failed or skipped. All three dependency lock hashes matched the checkout. The artifact and hosted job log were checked for key patterns and unmasked API-token assignments; none were found. A local negative check confirmed that missing `TEST_DATABASE_URL` stops integration verification. This closes the CI gate for the verified baseline, not the separate release gates in T11–T16 or T18–T19.
 
 - [ ] **T18 — Set operational limits, observability, retention, and restore procedures.**
   - **Priority:** P2.
@@ -727,7 +728,7 @@ provenance features, and Kubernetes/Kafka/ClickHouse without workload evidence.
 Preserve all published assets and failed-run evidence. Do not claim exactly-once
 external execution, model superiority, universal safety, or enterprise readiness.
 
-**Next executable task:** T17 evidence closure and hosted-CI gate review at the
-current pushed SHA. It needs no live model calls or product feature work. T12 now
-meets its local protocol gate. T13 remains unstarted until the required T17 review
-and T13 prerequisites pass. T11 still waits for its separate budget authorization.
+**Next executable task after T17 closure:** T13 independent-agent conformance.
+T12 and the hosted-CI review have passed their stated gates. T11 still waits for
+its separate live-model budget authorization. T15 requires its deployment-scope
+decision before its production security boundary can close.
