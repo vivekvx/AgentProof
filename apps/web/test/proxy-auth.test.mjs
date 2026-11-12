@@ -30,6 +30,13 @@ test("Vite API proxy adds the local bearer token without exposing it to the brow
     assert.equal(response.status, 204);
     assert.equal(receivedAuthorization, `Bearer ${token}`);
     assert.equal(response.headers.get("authorization"), null);
+
+    const forged = await fetch(`http://127.0.0.1:${address.port}/api/v2/datasets`, {
+      headers: { Authorization: "Bearer browser-supplied-token" },
+    });
+    assert.equal(forged.status, 204);
+    assert.equal(receivedAuthorization, `Bearer ${token}`);
+    assert.equal(forged.headers.get("authorization"), null);
   } finally {
     await vite?.close();
     await new Promise((resolve) => upstream.close(resolve));

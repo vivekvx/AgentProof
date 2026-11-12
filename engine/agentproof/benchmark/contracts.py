@@ -487,3 +487,11 @@ class EvaluationManifest(Contract):
     trials: int = Field(ge=1, le=5)
     scenario_ids: list[str] = Field(min_length=1, max_length=50)
     traceparent: str
+
+
+class StudyEvaluationManifest(EvaluationManifest):
+    """A study-bound v5 manifest keeps v2 evaluation semantics unchanged."""
+
+    schema_version: Literal["5.0"] = "5.0"
+    study_id: str = Field(pattern=r"^[a-f0-9-]{36}$")
+    study_plan: VersionReference

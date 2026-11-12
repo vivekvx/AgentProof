@@ -24,6 +24,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"os"
 	"regexp"
 	"strings"
 	"time"
@@ -35,7 +36,11 @@ type Starter interface {
 type TemporalStarter struct{ Client client.Client }
 
 func (t TemporalStarter) Start(ctx context.Context, id string) error {
-	_, err := t.Client.ExecuteWorkflow(ctx, client.StartWorkflowOptions{ID: "evaluation-" + id, TaskQueue: "agentproof-v1", WorkflowIDReusePolicy: enums.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE}, "EvaluationWorkflow", id)
+	queue := os.Getenv("AGENTPROOF_TASK_QUEUE")
+	if queue == "" {
+		queue = "agentproof-v1"
+	}
+	_, err := t.Client.ExecuteWorkflow(ctx, client.StartWorkflowOptions{ID: "evaluation-" + id, TaskQueue: queue, WorkflowIDReusePolicy: enums.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE}, "EvaluationWorkflow", id)
 	var already *serviceerror.WorkflowExecutionAlreadyStarted
 	if errors.As(err, &already) {
 		return nil
@@ -54,6 +59,7 @@ type Server struct {
 	Pool        *pgxpool.Pool
 	Starter     Starter
 	BearerToken string
+	RequireAuth bool
 }
 type Run struct {
 	ID        string            `json:"id"`
@@ -93,7 +99,7 @@ func ParseAgent(w http.ResponseWriter, r *http.Request) (string, error) {
 func (s *Server) Routes() http.Handler {
 	r := chi.NewRouter()
 	r.Group(func(api chi.Router) {
-		if s.BearerToken != "" {
+		if s.RequireAuth || s.BearerToken != "" {
 			api.Use(bearerAuthentication(s.BearerToken))
 		}
 		api.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
@@ -118,6 +124,10 @@ func (s *Server) Routes() http.Handler {
 func bearerAuthentication(token string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if len(token) < 32 {
+				problem(w, http.StatusServiceUnavailable, "control authentication is not configured")
+				return
+			}
 			provided := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
 			if provided == r.Header.Get("Authorization") || len(provided) != len(token) || subtle.ConstantTimeCompare([]byte(provided), []byte(token)) != 1 {
 				w.Header().Set("WWW-Authenticate", "Bearer")
@@ -130,16 +140,14 @@ func bearerAuthentication(token string) func(http.Handler) http.Handler {
 	}
 }
 
-// ValidateListenSecurity requires a strong bearer token before a non-loopback bind.
+// ValidateListenSecurity requires a control token for every API listener.
 func ValidateListenSecurity(address, token string) error {
-	host, _, err := net.SplitHostPort(address)
+	_, _, err := net.SplitHostPort(address)
 	if err != nil {
 		return errors.New("invalid API listen address")
 	}
-	ip := net.ParseIP(host)
-	loopback := (ip != nil && ip.IsLoopback()) || strings.EqualFold(host, "localhost")
-	if !loopback && len(token) < 32 {
-		return errors.New("non-loopback API listen requires AGENTPROOF_API_TOKEN with at least 32 characters")
+	if len(token) < 32 {
+		return errors.New("API listen requires AGENTPROOF_API_TOKEN with at least 32 characters")
 	}
 	return nil
 }

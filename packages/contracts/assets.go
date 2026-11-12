@@ -7,7 +7,7 @@ import (
 	"encoding/json"
 )
 
-//go:embed scenarios/*.json evaluators/*.json benchmarks/*.json agents/*.json tools/*.json v2/*.json v3/*.json
+//go:embed scenarios/*.json evaluators/*.json benchmarks/*.json agents/*.json tools/*.json experiments/*.json v2/*.json v3/*.json v5/*.json
 var Assets embed.FS
 
 type Reference struct {

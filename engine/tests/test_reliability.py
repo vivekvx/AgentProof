@@ -13,7 +13,22 @@ from agentproof.execution import execute, record_terminal_failure
 from agentproof.simulator import OrderSimulator
 from conftest import ROOT
 from temporalio.client import Client, WorkflowFailureError
-from temporalio.exceptions import CancelledError
+from temporalio.exceptions import ApplicationError, CancelledError
+
+
+@pytest.mark.asyncio
+async def test_missing_synthetic_run_stops_terminal_activity_retry(monkeypatch):
+    from agentproof import worker
+
+    def missing(**_):
+        raise ValueError("run not found")
+
+    monkeypatch.setattr(worker, "record_terminal_failure", missing)
+    with pytest.raises(ApplicationError) as caught:
+        await worker.terminal_failure({"run_id": str(uuid.uuid4())})
+    assert caught.value.type == "RunMissing"
+    assert caught.value.non_retryable
+
 
 EVIDENCE = Path(os.getenv("EVIDENCE_DIR", ROOT / ".local/implementation-02"))
 

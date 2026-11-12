@@ -9,7 +9,7 @@ RUN go mod download
 COPY apps/api ./apps/api
 COPY packages/contracts ./packages/contracts
 COPY db ./db
-RUN go version > /go.version && go build -o /api ./apps/api/cmd/server
+RUN go version > /go.version && go build -o /api ./apps/api/cmd/server && go build -o /api-migrate ./apps/api/cmd/migrate
 ENV API_ADDRESS=0.0.0.0:8080
 CMD ["/api"]
 

@@ -2,13 +2,20 @@
 
 import asyncio
 import json
+import uuid
 
 import httpx
+import psycopg
 import pytest
 from agentproof.benchmark.contracts import (
     AgentConfiguration,
     ModelConfiguration,
     PublicContext,
+)
+from agentproof.benchmark.experiment_budget import (
+    admit_request,
+    bind_trial,
+    initialize,
 )
 from agentproof.benchmark.llm import (
     Journal,
@@ -119,6 +126,163 @@ def public(case=0):
         permissions=sc.permissions.model_copy(deep=True),
         limits=sc.limits.model_copy(deep=True),
     )
+
+
+@pytest.mark.asyncio
+async def test_bound_study_request_admitted_before_mock_provider(
+    benchmark_factory, dsn
+):
+    _, trials, _ = benchmark_factory(version=5, ids=["cs-001"])
+    trial = trials[0]
+    study = "budget-test-" + uuid.uuid4().hex
+    try:
+        with psycopg.connect(dsn) as conn:
+            initialize(conn, study)
+            bind_trial(conn, trial, "slot-1", study)
+        model = FakeModel([probe(), final()])
+        with connect(dsn) as conn:
+            journal = Journal(conn, trial)
+            outcome = await run_llm(
+                public(),
+                configuration(),
+                lambda *_: None,
+                journal,
+                lambda _: (model, Client()),
+            )
+            assert outcome.resolution == "completed"
+            assert model.calls == 2
+            rows = conn.execute(
+                "SELECT sequence,state,observed_tokens FROM benchmark_study_requests WHERE trial_id=%s ORDER BY sequence",
+                (trial,),
+            ).fetchall()
+            assert rows == [(1, "known", 30), (2, "known", 30)]
+            assert len(journal.metadata()) == 2
+    finally:
+        with psycopg.connect(dsn) as conn:
+            conn.execute(
+                "DELETE FROM benchmark_study_requests WHERE trial_id=%s", (trial,)
+            )
+            conn.execute(
+                "DELETE FROM benchmark_study_trials WHERE trial_id=%s", (trial,)
+            )
+            conn.execute(
+                "DELETE FROM benchmark_study_reservations WHERE study_id=%s", (study,)
+            )
+            conn.execute(
+                "DELETE FROM benchmark_study_budgets WHERE study_id=%s", (study,)
+            )
+
+
+@pytest.mark.asyncio
+async def test_shared_budget_exhaustion_stops_before_provider_and_cannot_pass(
+    benchmark_factory, dsn, tmp_path, monkeypatch
+):
+    from agentproof.benchmark import llm
+    from agentproof.benchmark.execution import execute_trial
+
+    cfg = configuration()
+    (tmp_path / "test-real.v1.json").write_text(cfg.model_dump_json())
+    monkeypatch.setenv("AGENTPROOF_MODEL_CONFIG_DIR", str(tmp_path))
+    model = FakeModel([probe(), final()])
+    monkeypatch.setattr(llm, "build_model", lambda _: (model, Client()))
+    _, trials, _ = benchmark_factory(agent="test-real", ids=["cs-001"], version=5)
+    trial = trials[0]
+    study = "budget-test-" + uuid.uuid4().hex
+    try:
+        with psycopg.connect(dsn) as conn:
+            initialize(conn, study)
+            bind_trial(conn, trial, "slot-1", study)
+            admit_request(conn, trial, 6, 64000, "0.1")
+        result = await execute_trial(trial, dsn)
+        assert result["verdict"] == "INDETERMINATE"
+        assert result["failure_category"] == "infrastructure"
+        assert model.calls == 0
+        with psycopg.connect(dsn) as conn:
+            assert conn.execute(
+                "SELECT count(*) FROM benchmark_model_calls WHERE trial_id=%s",
+                (trial,),
+            ).fetchone() == (0,)
+    finally:
+        with psycopg.connect(dsn) as conn:
+            conn.execute(
+                "DELETE FROM benchmark_study_requests WHERE trial_id=%s", (trial,)
+            )
+            conn.execute(
+                "DELETE FROM benchmark_study_trials WHERE trial_id=%s", (trial,)
+            )
+            conn.execute(
+                "DELETE FROM benchmark_study_reservations WHERE study_id=%s", (study,)
+            )
+            conn.execute(
+                "DELETE FROM benchmark_study_budgets WHERE study_id=%s", (study,)
+            )
+
+
+@pytest.mark.asyncio
+async def test_interrupted_study_request_is_infrastructure_uncertainty(
+    benchmark_factory, dsn, tmp_path, monkeypatch
+):
+    from agentproof.benchmark import llm
+    from agentproof.benchmark.execution import execute_trial
+
+    cfg = configuration()
+    (tmp_path / "test-real.v1.json").write_text(cfg.model_dump_json())
+    monkeypatch.setenv("AGENTPROOF_MODEL_CONFIG_DIR", str(tmp_path))
+    model = FakeModel([probe(), final()])
+    monkeypatch.setattr(llm, "build_model", lambda _: (model, Client()))
+    _, trials, _ = benchmark_factory(agent="test-real", ids=["cs-001"], version=5)
+    trial = trials[0]
+    study = "budget-test-" + uuid.uuid4().hex
+    try:
+        with psycopg.connect(dsn) as conn:
+            initialize(conn, study)
+            bind_trial(conn, trial, "slot-1", study)
+        with psycopg.connect(dsn, autocommit=True) as conn:
+            assert Journal(conn, trial).reserve(1, 1000, "0.01") is None
+        result = await execute_trial(trial, dsn)
+        assert result["verdict"] == "INDETERMINATE"
+        assert result["failure_category"] == "infrastructure"
+        assert result["assessment"]["execution"] == "infrastructure"
+        assert result["assessment"]["provider"] == "unknown"
+        assert model.calls == 0
+        with psycopg.connect(dsn) as conn:
+            assert conn.execute(
+                "SELECT state FROM benchmark_study_requests WHERE trial_id=%s AND sequence=1",
+                (trial,),
+            ).fetchone() == ("unknown",)
+    finally:
+        with psycopg.connect(dsn) as conn:
+            conn.execute(
+                "DELETE FROM benchmark_study_requests WHERE trial_id=%s", (trial,)
+            )
+            conn.execute(
+                "DELETE FROM benchmark_study_trials WHERE trial_id=%s", (trial,)
+            )
+            conn.execute(
+                "DELETE FROM benchmark_study_reservations WHERE study_id=%s", (study,)
+            )
+            conn.execute(
+                "DELETE FROM benchmark_study_budgets WHERE study_id=%s", (study,)
+            )
+
+
+def test_late_model_response_cannot_rewrite_unknown_request(benchmark_factory, dsn):
+    _, trials, _ = benchmark_factory(version=5, ids=["cs-001"])
+    trial = trials[0]
+    with connect(dsn) as conn:
+        journal = Journal(conn, trial)
+        assert journal.reserve(1) is None
+        journal.fail(1, "interrupted_unknown_usage")
+        with pytest.raises(ProviderFailure, match="already_terminal"):
+            journal.complete(
+                1,
+                final(),
+                {"input_tokens": 20, "output_tokens": 10, "estimated_cost_usd": 0.001},
+            )
+        assert conn.execute(
+            "SELECT status,response FROM benchmark_model_calls WHERE trial_id=%s AND sequence=1",
+            (trial,),
+        ).fetchone() == ("failed", None)
 
 
 @pytest.mark.asyncio

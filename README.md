@@ -154,6 +154,9 @@ control-plane bearer token. The response contains a public task and a trial-scop
 credential. Keep this credential out of logs. The task contains the request, permitted
 tool schemas, limits, trial identity, attempt, deadline, and `resume_token`. It does not
 contain fixture state, private assertions, or evaluator data.
+The request text includes public order and customer IDs from the user request.
+`engine/tests/fixtures/independent_support_agent.py` shows a separate-process
+HTTP client. `engine/tests/test_independent_agent_conformance.py` scores it.
 
 The external client sends versioned tool calls to
 `POST /agent/v1/sessions/TRIAL_ID/tools`. Each call includes `run_id`, `trial_id`, a
@@ -177,6 +180,21 @@ stores only a token hash. The agent supplies requests and an outcome claim, not 
 fixture state, evidence, or a verdict. A workflow or worker failure leaves the trial
 incomplete until trusted evidence permits finalization.
 
+The local deployment trusts the operator, the host, and the Compose network. The
+control token grants access to all control-plane runs. The dashboard proxy adds that
+token for a local browser, so a browser that can use the local dashboard has the same
+control-plane authority. A session token grants tool access only for one trial and
+attempt. After its deadline, writes stop; the result endpoint remains readable for
+30 seconds so the agent can inspect an expired or cancelled result. After that,
+the session token cannot read the result. Do not give an
+untrusted process host access or attach it to the Compose network. The local setup is
+not a multi-tenant or public-agent sandbox. Compose runs schema migration once with
+the development database owner, then starts the API and worker with a separate
+non-admin runtime role. The committed runtime password is synthetic local setup data;
+replace this credential and separate the two runtime roles before any broader
+deployment. Native `make api` still runs migrations with its configured database user
+and is a development path, not the scoped container security boundary.
+
 The predeclared Groq study is `packages/contracts/experiments/groq-gpt-oss-matched.v1.json`.
 It pins two development scenarios, two trials per model per scenario, asset and
 profile hashes, equal execution limits, a maximum of 48 model requests, 80 tool
@@ -188,6 +206,22 @@ bytes before any later authorized run with:
 ```sh
 uv run --project engine --frozen python -c 'from pathlib import Path; from agentproof.benchmark.experiment import load_plan, verify_plan; print(verify_plan(load_plan(), Path.home()/".config/agentproof/models"))'
 ```
+
+Study dispatch is disabled unless the API has `AGENTPROOF_ENABLE_STUDY_DISPATCH=1`.
+An authenticated `POST /api/v2/studies` with an `Idempotency-Key` and
+`{"schema_version":"study-create-v1","plan_id":"..."}` commits the frozen plan and
+all eight trial slots before workflow dispatch. `GET /api/v2/studies/{id}` reports
+pending and terminal counts; `POST /api/v2/studies/{id}/cancel` stops new admission.
+The isolated mock verification uses synthetic credentials and a local model endpoint:
+
+```sh
+AGENTPROOF_STUDY_TEST_DB=agentproof_study_test_local PYTHONPATH=engine uv run --project engine --frozen python scripts/verify_mocked_study.py
+```
+
+Use a fresh `agentproof_study_test_*` database name for each run. The script refuses
+to overwrite an existing test database. It requires local PostgreSQL and Temporal
+test services and makes no Groq request. The study gate remains open until the
+remaining interruption and resource measurements in `PLAN.md` are verified.
 
 Results use PASS, FAIL, or INDETERMINATE. Assertion failures are agent failures.
 Evaluator defects, infrastructure failures, and cancellation remain separate categories.
@@ -374,29 +408,180 @@ Read [the reliability report](IMPLEMENTATION-02.md) for failure classifications 
 Start the complete container environment with `make dev-docker`.
 Run `make verify-docker` to build and test in a clean Linux container.
 This uses PostgreSQL, Temporal, Jaeger, the API, the worker, and the dashboard.
+Compose runs a one-shot migration service before the API. It gives the API and worker
+a local runtime database role without schema or role administration rights.
 The verification runner contains Go, Node.js, Python, and Chromium. Host package
 installations and the host virtual environment are excluded from its image.
 
 For an isolated test stack beside existing local services:
+Export `AGENTPROOF_API_TOKEN` as a random local token before these commands.
+The recovery script uses that token for direct API requests.
 
 ```sh
 docker compose --env-file infra/verification.env -p agentproof-verification up -d --build --wait
 docker compose --env-file infra/verification.env -p agentproof-verification --profile verification build verify
 docker compose --env-file infra/verification.env -p agentproof-verification --profile verification run --rm verify
 python3 scripts/verify_service_recovery.py --project agentproof-verification
+uv run --project engine --frozen python scripts/verify_bounded_workload.py \
+  --database-url 'postgresql://agentproof_runtime:agentproof_runtime_local_only@127.0.0.1:55433/agentproof'
 ```
 
 The isolated dashboard uses port 5174. Its API uses 8081, PostgreSQL 55433,
-Temporal 7234, Temporal UI 8234, Jaeger 16687, and OTLP HTTP 4319.
+Temporal 7234, Temporal UI 8234, Jaeger 16687, direct Jaeger OTLP HTTP
+4319, and queued collector OTLP HTTP 4321.
 The service recovery script stops and restarts only PostgreSQL and Temporal in
 the selected test project. If Docker uses another context, pass `--context NAME`.
 Do not run this script against a shared development stack during other work.
 
 Compose initializes only the Temporal volume ownership before starting the
 non-root Temporal server. Named volumes retain order data, results, and workflow history.
-Jaeger uses development memory storage. Exported trace evidence is saved separately.
-Evidence files are written to `.local/implementation-02` and retained by CI.
+Jaeger uses a local Badger named volume with a 168-hour span TTL. The
+OpenTelemetry Collector queues exports in a separate named volume with a
+128-batch limit, 128 MiB memory limiter, and ten-minute retry horizon. A
+correlated 147-span synthetic trace remained queryable after Jaeger restarted.
+A separate two-second TTL probe confirmed Badger removes expired traces.
+These volumes are not included in PostgreSQL backups.
+Local recovery and workload evidence is written to `.local/verification`.
 No cleanup command removes failed application runs.
+
+### Local operations and T18 boundaries
+
+The supported observation is one local, single-tenant eight-slot study: two
+evaluations, eight trials, one API, and one worker. Study creation uses a
+PostgreSQL transaction advisory lock to atomically reject a second active
+study across API instances. Cancellation retains the slot until all child
+evaluations and trials are terminal; a later study can reuse the frozen plan.
+The generic benchmark API and Temporal SDK worker defaults do not enforce
+this envelope for non-study workloads. Higher capacity is unverified.
+
+| Boundary | Observed or configured value | Operator action |
+| --- | --- | --- |
+| Queue and task time | T16 queue wait p50/p95 1.759/2.314 seconds; active trial p50/p95 0.211/0.338 seconds | Investigate queued evaluations beyond 10 seconds. The per-trial active limit is 5 seconds. At 180 seconds the API initiates study cancellation and retries its Temporal signal after restart; child finalization can finish later. These are configured stops, not latency SLOs. |
+| Budget | Eight slots, 48 model requests, 80 tool calls, 512,000 configured tokens, 40 active seconds, 0.8 USD estimated cost | Stop dispatch on a ceiling or unknown provider usage. Unknown usage retains its full reservation; the estimate is not an invoice. |
+| Database | T16 sampled peak seven connections; a separate 20-connection isolated database rejected its twentieth application connection and recovered after release | Alert above seven connections as a breach of the measured envelope. This is not a measured database capacity limit. |
+| Process resources | T16 API RSS p50/p95 36.92/43.87 MiB and CPU 0.2/17.71%; worker RSS 142.51/155.73 MiB and CPU 45.6/69.48% | Allow headroom for restart and telemetry failure. A later trace-recovery run sampled worker RSS at 176.98 MiB peak; no machine capacity ceiling is established. |
+| Storage | T16 measured 2,842,624 bytes of database growth for one eight-slot study | Watch free disk and back up before another study. This single measurement cannot be extrapolated into a storage capacity claim. |
+| Recovery | API graceful shutdown is bounded to 5 seconds; activity heartbeat is every second with a 5-second timeout | Cancel workflows rather than force-terminate them. After a Temporal outage, check the worker separately and restart it if stopped. Preserve pending and unknown-use records. |
+
+The local alert check reports stable codes without run or trial IDs:
+
+```sh
+export AGENTPROOF_API_TOKEN='<local control token>'
+export AGENTPROOF_MODEL_CONFIG_DIR="$PWD/.local/verification/mock-study-config"
+uv run --project engine --frozen python scripts/operational_checks.py \
+  --database-url 'postgresql://agentproof:agentproof@127.0.0.1:55433/agentproof_study_test_t18seed' \
+  --backup-exit 0 --restore-exit 0
+```
+
+Pass the actual exit codes from the most recent backup and isolated restore;
+the check returns nonzero while any alert is active. It probes API, worker
+container, Temporal, PostgreSQL, Jaeger, and the collector container and its
+recent rejection logs. It checks stalled studies against
+the 180-second wall ceiling, queue waiting against 10 seconds (over four times
+the measured T16 p95), connections above the seven-connection observed peak,
+two provider failures in five minutes, committed execution-limit issues, and
+recent evidence verification failures. The last three are diagnostic alerts,
+not accepted SLOs. Synthetic threshold tests trigger and clear all alert
+codes. Stopping and restoring each dedicated Compose service triggered and
+cleared its availability alert; Temporal interruption also stopped the worker,
+which required an explicit restart.
+
+Start the dedicated stack with the commands above and verify its API health:
+
+```sh
+docker compose --env-file infra/verification.env -p agentproof-verification up -d --wait
+curl -fsS -H "Authorization: Bearer $AGENTPROOF_API_TOKEN" http://127.0.0.1:8081/healthz
+docker compose --env-file infra/verification.env -p agentproof-verification stop api worker
+docker compose --env-file infra/verification.env -p agentproof-verification up -d --wait api worker
+```
+
+For PostgreSQL or Temporal recovery in this dedicated stack, use
+`python3 scripts/verify_service_recovery.py --project agentproof-verification`.
+Check the worker afterward with the alert command and run
+`docker compose --env-file infra/verification.env -p agentproof-verification up -d --wait worker`
+if needed. Do not use these interruption commands against a shared deployment.
+
+Create a protected backup with `umask 077`, `pg_dump -Fc`, and a recorded
+SHA-256. The tested procedure below creates a real archive from a dedicated
+synthetic study database, restores it into a fresh PostgreSQL container,
+replays evidence offline, checks API reads and runtime-role permissions, tests
+connection exhaustion, and rejects a truncated archive in a disposable copy:
+
+```sh
+AGENTPROOF_STUDY_TEST_DB=agentproof_study_test_t18example \
+  uv run --project engine --frozen python scripts/verify_mocked_study.py
+uv run --project engine --frozen python scripts/verify_isolated_restore.py \
+  --source-db agentproof_study_test_t18example --prepare-synthetic
+```
+
+Keep real backups outside the repository with restricted access and verify
+their checksums before use. Restore into an empty isolated database first.
+The local runtime role needs its grants reapplied after a `--no-acl` restore;
+it can read and write application rows but cannot create schema objects or
+read `schema_migrations`. The initial synthetic restore verified 20 migrations;
+the coordinated restore verified 21,
+matching canonical hashes for studies, evaluations, trials, evidence,
+provenance, budgets, sessions, and the v5 published dataset. Offline replay
+made no provider request.
+
+PostgreSQL archives do **not** include Temporal histories. This Compose
+deployment stores Temporal's development SQLite database in its own named
+`temporal` volume. A one-shot namespace configuration sets closed-workflow
+retention to 604800 seconds (seven days); a newly closed 65-event workflow
+remained queryable. History and visibility archival remain disabled. Seven-day
+expiry was not observed over a seven-day interval; the effective namespace
+setting was read back.
+Recover a stopped Temporal service from that volume, then restart the worker
+and let the durable queued-row dispatcher reconcile pending work. The mocked
+API/Temporal interruption test recovered eight PASS trials and the original
+study identity after a same-key retry. A PostgreSQL-only restore cannot
+recreate active Temporal histories; test a coordinated volume backup and
+restore before assigning an active-workflow recovery objective.
+
+Jaeger now uses local Badger storage with a 168-hour TTL. When Jaeger or OTLP was unavailable,
+the synthetic eight-trial study still recorded eight PASS verdicts and one
+effect per trial. The short outage produced one API export error and four
+worker warnings; sampled worker RSS peaked at 159.98 MiB. No credential
+pattern appeared in those logs. This does not prove long-outage retry or
+memory bounds. A simultaneous API/worker interruption under
+OTLP failure recovered seven PASS and one infrastructure INDETERMINATE trial,
+with the uncertain request still reserved. Lost spans from the earlier direct
+export outage did not return. With the disk-backed collector, a trace accepted
+during a Jaeger outage survived a collector restart and appeared after Jaeger
+returned. Disposable probes confirmed queue overflow and a full 2 MiB disk
+produce collector rejection logs; the OTLP receiver can still return HTTP
+200 because batching is asynchronous. The operator alert checks recent
+rejections. A ten-minute outage or overflow can still lose spans. Treat
+missing traces as telemetry degradation, never as evidence of a PASS.
+
+The following retention periods are approved local implementation targets,
+**not active deletion rules or measured SLOs**.
+The dry-run selector in `scripts/retention_policy.py` never deletes records;
+synthetic boundary tests cover exact expiry and protected categories.
+
+| Data | Proposed period | Current boundary and decision |
+| --- | --- | --- |
+| Published datasets, immutable results, evidence, provenance | Indefinite | Preserve failed and indeterminate runs for replay. No destructive rule is enabled; owner approval is required before any change. |
+| Temporal histories | At least 7 days after terminal state | Effective namespace setting is 604800 seconds; a coordinated terminal-history snapshot recovered. Active-history recovery is unverified. |
+| Application logs | 7 days | Docker has no time-based retention in this stack; seven-day enforcement remains open. Redact credentials before sharing. |
+| Traces | 7 days | Badger uses a 168-hour TTL, and a two-second probe confirmed expiry. Outage and overflow can still lose spans. |
+| Synthetic test databases | 30 days after verified review | Keep failed-run fixtures until verification is complete; deletion requires separate authorization. |
+| Backups | Daily for 30 days; monthly for 12 months | A local AES-256-GCM CMS archive decrypted and restored with matching SHA-256; scheduling and off-host key custody remain open. |
+| Temporary evidence exports | 24 hours after verified review or transfer | Keep under a private directory; dry-run review requires a verified timestamp and never deletes. |
+
+The dry run also tests seven-day closed-history, 30-day reviewed synthetic
+database, 30-day daily backup, 12-calendar-month monthly backup, and 24-hour
+verified-export boundaries. It never deletes. Three repeated healthy studies
+completed eight PASS trials each in 5.715–5.869 seconds; queue-wait p95 was
+3.818–4.407 seconds, database growth 2,859,008–2,883,584 bytes, worker peak
+RSS 156.31–163.62 MiB, API peak RSS 43.56–45.92 MiB, and sampled peak
+connections seven. These remain SLO candidates, not accepted service SLOs.
+No active-workflow RTO/RPO is promised. A quiesced terminal-state snapshot
+restored PostgreSQL, Temporal, and Jaeger separately: 18 PostgreSQL table
+hashes matched, eight evidence chains and offline replay passed, the API read
+the completed study, a 65-event Temporal history hash matched, and 174 trace
+span identities matched. Active-workflow and queued-span recovery need
+separate proof. T14 and T19 remain separate gates.
 
 `Idempotency-Key` is an optional header for `POST /api/v1/runs`. Reuse the same
 key and body to recover an uncertain response. A changed agent with the same key
@@ -443,6 +628,8 @@ Run all commands from the repository root.
 
 ```sh
 cp .env.example .env
+chmod 600 .env
+printf 'AGENTPROOF_API_TOKEN=%s\n' "$(openssl rand -hex 32)" >> .env
 set -a
 . ./.env
 set +a
@@ -451,7 +638,8 @@ make infra
 ```
 
 Wait for PostgreSQL and Temporal to start. The API applies migrations on startup.
-Start each application in a separate terminal. Load `.env` in each terminal first.
+Start each application in a separate terminal. Load the same ignored `.env` file
+in each terminal. The API and dashboard proxy must use the same local control token.
 
 ```sh
 set -a; . ./.env; set +a
@@ -464,6 +652,7 @@ make worker
 ```
 
 ```sh
+set -a; . ./.env; set +a
 make web
 ```
 

@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestValidateListenSecurity(t *testing.T) {
@@ -15,9 +16,10 @@ func TestValidateListenSecurity(t *testing.T) {
 		token   string
 		valid   bool
 	}{
-		{"127.0.0.1:8080", "", true},
-		{"[::1]:8080", "", true},
-		{"localhost:8080", "", true},
+		{"127.0.0.1:8080", "", false},
+		{"[::1]:8080", "", false},
+		{"localhost:8080", "", false},
+		{"127.0.0.1:8080", strings.Repeat("x", 32), true},
 		{"0.0.0.0:8080", "", false},
 		{":8080", "", false},
 		{"0.0.0.0:8080", strings.Repeat("x", 31), false},
@@ -64,14 +66,65 @@ func TestBearerAuthentication(t *testing.T) {
 	}
 }
 
+func TestControlTokenRotationRejectsPreviousToken(t *testing.T) {
+	oldToken := strings.Repeat("a", 32)
+	newToken := strings.Repeat("b", 32)
+	handler := bearerAuthentication(newToken)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	for _, tc := range []struct {
+		token string
+		want  int
+	}{{oldToken, http.StatusUnauthorized}, {newToken, http.StatusNoContent}} {
+		request := httptest.NewRequest(http.MethodGet, "/", nil)
+		request.Header.Set("Authorization", "Bearer "+tc.token)
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != tc.want {
+			t.Fatalf("rotation returned %d, want %d", response.Code, tc.want)
+		}
+	}
+}
+
 func TestRoutesRequireBearerOnAllRouteFamilies(t *testing.T) {
-	handler := (&Server{BearerToken: "a-token-long-enough-for-tests-0123456789"}).Routes()
+	handler := (&Server{BearerToken: "a-token-long-enough-for-tests-0123456789", RequireAuth: true}).Routes()
 	for _, path := range []string{"/healthz", "/api/v1/runs", "/api/v2/datasets"} {
 		response := httptest.NewRecorder()
 		handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, path, nil))
 		if response.Code != http.StatusUnauthorized {
 			t.Errorf("%s returned %d without credentials", path, response.Code)
 		}
+	}
+}
+
+func TestProtectedRoutesFailClosedWithoutConfiguredToken(t *testing.T) {
+	handler := (&Server{RequireAuth: true}).Routes()
+	for _, route := range []struct{ method, path string }{
+		{http.MethodGet, "/healthz"},
+		{http.MethodGet, "/api/v1/runs"},
+		{http.MethodGet, "/api/v2/datasets"},
+		{http.MethodPost, "/api/v2/external/sessions/00000000-0000-0000-0000-000000000001"},
+	} {
+		request := httptest.NewRequest(route.method, route.path, nil)
+		request.Header.Set("Authorization", "Bearer ")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != http.StatusServiceUnavailable {
+			t.Errorf("%s returned %d without configured control token", route.path, response.Code)
+		}
+	}
+}
+
+func TestExternalResultReadGraceIsBounded(t *testing.T) {
+	expires := time.Unix(1000, 0)
+	if !externalResultReadable(expires, expires) {
+		t.Fatal("result cannot be read immediately after action expiry")
+	}
+	if !externalResultReadable(expires, expires.Add(externalResultReadGrace-time.Nanosecond)) {
+		t.Fatal("result closed before grace deadline")
+	}
+	if externalResultReadable(expires, expires.Add(externalResultReadGrace)) {
+		t.Fatal("expired result credential remains valid")
 	}
 }
 

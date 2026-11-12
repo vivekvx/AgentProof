@@ -95,6 +95,12 @@ type externalReplayReader interface {
 	QueryRow(context.Context, string, ...any) pgx.Row
 }
 
+const externalResultReadGrace = 30 * time.Second
+
+func externalResultReadable(expires, now time.Time) bool {
+	return now.Before(expires.Add(externalResultReadGrace))
+}
+
 func (s *Server) externalWorkflow(w http.ResponseWriter) (externalWorkflow, bool) {
 	value, ok := s.Starter.(externalWorkflow)
 	if !ok {
@@ -515,6 +521,10 @@ func (s *Server) externalResult(w http.ResponseWriter, r *http.Request) {
 	actual := hex.EncodeToString(digest[:])
 	if len(actual) != len(storedHash) || subtle.ConstantTimeCompare([]byte(actual), []byte(storedHash)) != 1 {
 		problem(w, http.StatusUnauthorized, "invalid session credential")
+		return
+	}
+	if !externalResultReadable(expires, time.Now()) {
+		problem(w, http.StatusGone, "external result credential expired")
 		return
 	}
 	var result json.RawMessage

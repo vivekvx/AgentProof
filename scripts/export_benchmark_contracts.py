@@ -27,3 +27,9 @@ v3.mkdir(exist_ok=True)
 (v3 / "AgentConfiguration.schema.json").write_text(
     json.dumps(contracts.AgentConfigurationV3.model_json_schema(), indent=2) + "\n"
 )
+
+v5 = root.parent / "v5"
+v5.mkdir(exist_ok=True)
+(v5 / "StudyEvaluationManifest.schema.json").write_text(
+    json.dumps(contracts.StudyEvaluationManifest.model_json_schema(), indent=2) + "\n"
+)

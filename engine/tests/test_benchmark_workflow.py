@@ -49,6 +49,32 @@ def external_agent_config(ttl=30):
     }
 
 
+@pytest.mark.asyncio
+async def test_deleted_synthetic_evaluation_does_not_retry_forever(dsn, monkeypatch):
+    address = os.getenv("TEST_TEMPORAL_ADDRESS")
+    if not address:
+        pytest.skip("Set TEST_TEMPORAL_ADDRESS for real Temporal integration")
+    monkeypatch.setenv("DATABASE_URL", dsn)
+    client = await Client.connect(address)
+    queue = "agentproof-missing-" + str(uuid.uuid4())
+    async with Worker(
+        client,
+        task_queue=queue,
+        workflows=[BenchmarkWorkflow],
+        activities=list(activities.ACTIVITIES),
+    ):
+        handle = await client.start_workflow(
+            BenchmarkWorkflow.run,
+            str(uuid.uuid4()),
+            id=queue,
+            task_queue=queue,
+        )
+        with pytest.raises(WorkflowFailureError) as caught:
+            await asyncio.wait_for(handle.result(), 15)
+        assert isinstance(caught.value.cause, ApplicationError)
+        assert caught.value.cause.type == "EvaluationEvidenceMissing"
+
+
 def install_external_profile(tmp_path, monkeypatch, ttl=30):
     config = external_agent_config(ttl)
     raw = json.dumps(config, sort_keys=True, separators=(",", ":")).encode()

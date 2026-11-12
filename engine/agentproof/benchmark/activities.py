@@ -31,7 +31,14 @@ from .simulator import ARGUMENTS, OrderSimulator, ReplayMismatch
 
 @activity.defn(name="benchmark_plan")
 async def benchmark_plan(evaluation_id: str) -> list[str]:
-    return await asyncio.to_thread(plan, evaluation_id)
+    try:
+        return await asyncio.to_thread(plan, evaluation_id)
+    except ValueError as error:
+        if str(error) != "unknown evaluation":
+            raise
+        raise ApplicationError(
+            "evaluation_missing", type="EvaluationMissing", non_retryable=True
+        ) from None
 
 
 @activity.defn(name="benchmark_trial")
@@ -366,12 +373,26 @@ async def benchmark_external_terminal(payload: dict) -> dict:
 
 @activity.defn(name="benchmark_fail_trial")
 async def benchmark_fail_trial(data: dict) -> dict:
-    return await asyncio.to_thread(fail_trial, **data)
+    try:
+        return await asyncio.to_thread(fail_trial, **data)
+    except ValueError as error:
+        if str(error) != "unknown benchmark trial":
+            raise
+        raise ApplicationError(
+            "trial_missing", type="TrialMissing", non_retryable=True
+        ) from None
 
 
 @activity.defn(name="benchmark_finalize")
 async def benchmark_finalize(data: dict) -> dict:
-    return await asyncio.to_thread(finalize, **data)
+    try:
+        return await asyncio.to_thread(finalize, **data)
+    except ValueError as error:
+        if str(error) != "unknown evaluation":
+            raise
+        raise ApplicationError(
+            "evaluation_missing", type="EvaluationMissing", non_retryable=True
+        ) from None
 
 
 ACTIVITIES = [

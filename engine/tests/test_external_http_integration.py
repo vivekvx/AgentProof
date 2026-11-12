@@ -229,6 +229,13 @@ async def test_external_http_bridge_end_to_end(
 
     try:
         assert await _wait_until(wait_for_health, timeout=45), log_path.read_text()
+        for path in ("/healthz", "/api/v1/runs", "/api/v2/datasets"):
+            for headers in ({}, {"Authorization": "Bearer invalid"}):
+                denied_status, denied = await asyncio.to_thread(
+                    _http, base_url + path, headers=headers
+                )
+                assert denied_status == 401
+                assert denied == {"error": "authentication required"}
         async with Worker(
             client,
             task_queue=queue,
@@ -240,6 +247,14 @@ async def test_external_http_bridge_end_to_end(
             )
             issued = await open_session(trial_id)
             credential = issued["credential"]
+            oversized_status, _ = await asyncio.to_thread(
+                _http,
+                base_url + f"/agent/v1/sessions/{trial_id}/tools",
+                "POST",
+                b"x" * 4097,
+                scoped_headers(credential),
+            )
+            assert oversized_status == 400
             with psycopg.connect(dsn) as conn:
                 session = conn.execute(
                     "SELECT evaluation_id,scenario_id,attempt,state FROM benchmark_external_sessions WHERE trial_id=%s",
@@ -404,6 +419,10 @@ async def test_external_http_bridge_end_to_end(
                 scoped_headers(unsafe_credential),
             )
             assert malformed_status == 400
+            canary = socket.socket()
+            canary.bind(("127.0.0.1", 0))
+            canary.listen()
+            canary.settimeout(0.1)
             unknown_call = {
                 "schema_version": "1.0",
                 "run_id": unsafe_run,
@@ -411,7 +430,10 @@ async def test_external_http_bridge_end_to_end(
                 "sequence": 1,
                 "operation_id": str(uuid.uuid4()),
                 "tool": "delete_customer",
-                "arguments": {"order_id": "order-001"},
+                "arguments": {
+                    "order_id": "order-001",
+                    "callback_url": f"http://127.0.0.1:{canary.getsockname()[1]}/secret",
+                },
             }
             unknown_status, unknown = await asyncio.to_thread(
                 _http,
@@ -422,6 +444,9 @@ async def test_external_http_bridge_end_to_end(
             )
             assert unknown_status == 400
             assert unknown["error_code"] == "unknown_tool"
+            with pytest.raises(socket.timeout):
+                canary.accept()
+            canary.close()
             unauthorized_call = {
                 "schema_version": "1.0",
                 "run_id": unsafe_run,

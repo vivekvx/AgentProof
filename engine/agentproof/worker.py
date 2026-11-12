@@ -55,7 +55,16 @@ async def execute_evaluation(run_id: str) -> dict:
 
 @activity.defn(name="record_terminal_failure")
 async def terminal_failure(data: dict) -> dict:
-    return await asyncio.to_thread(record_terminal_failure, **data)
+    try:
+        return await asyncio.to_thread(record_terminal_failure, **data)
+    except ValueError as error:
+        if str(error) != "run not found":
+            raise
+        # A deleted synthetic run has no terminal row to write. Retry cannot
+        # recover it and must not occupy a worker indefinitely.
+        raise ApplicationError(
+            "run_missing", type="RunMissing", non_retryable=True
+        ) from None
 
 
 # Retain this activity name for histories started by Implementation 01.

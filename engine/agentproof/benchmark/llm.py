@@ -33,6 +33,14 @@ from pydantic_ai.tools import ToolDefinition
 
 from ..telemetry import tracer
 from .contracts import AgentOutcome, ModelConfiguration
+from .experiment_budget import (
+    BudgetExceeded,
+    QuotaDeferred,
+    ReservationConflict,
+    admit_request,
+    reconcile_request,
+    record_rate_limit,
+)
 from .simulator import ARGUMENTS, AgentLimit
 
 _MODEL_GATE = threading.Lock()
@@ -50,6 +58,10 @@ async def model_gate():
 
 class ProviderFailure(RuntimeError):
     """Sanitized provider error, never an SDK error body or request URL."""
+
+
+class StudyBudgetFailure(RuntimeError):
+    """Shared admission stopped execution before provider dispatch."""
 
 
 SAFE_PROVIDER_CODES = frozenset(
@@ -155,7 +167,7 @@ class Journal:
     def __init__(self, conn, trial_id):
         self.conn, self.trial_id = conn, trial_id
 
-    def reserve(self, sequence):
+    def reserve(self, sequence, tokens=None, estimated_cost=None):
         with self.conn.transaction():
             row = self.conn.execute(
                 "SELECT status,response,metadata FROM benchmark_model_calls WHERE trial_id=%s AND sequence=%s",
@@ -169,6 +181,15 @@ class Journal:
                         row[2].get("error", "interrupted_unknown_usage")
                     )
                 return ModelMessagesTypeAdapter.validate_python(row[1])[0], row[2]
+            if tokens is not None and estimated_cost is not None:
+                try:
+                    admit_request(
+                        self.conn, self.trial_id, sequence, tokens, estimated_cost
+                    )
+                except QuotaDeferred:
+                    raise ProviderFailure("rate_limit") from None
+                except (BudgetExceeded, ReservationConflict) as error:
+                    raise StudyBudgetFailure(str(error)) from None
             self.conn.execute(
                 "INSERT INTO benchmark_model_calls(trial_id,sequence,status) VALUES(%s,%s,'pending')",
                 (self.trial_id, sequence),
@@ -176,21 +197,55 @@ class Journal:
         return None
 
     def complete(self, sequence, response, metadata):
-        self.conn.execute(
-            "UPDATE benchmark_model_calls SET status='completed',response=%s,metadata=%s WHERE trial_id=%s AND sequence=%s",
-            (
-                Jsonb(ModelMessagesTypeAdapter.dump_python([response], mode="json")),
-                Jsonb(metadata),
+        with self.conn.transaction():
+            reconcile_request(
+                self.conn,
                 self.trial_id,
                 sequence,
-            ),
-        )
+                tokens=(metadata["input_tokens"] + metadata["output_tokens"])
+                if metadata.get("input_tokens") is not None
+                and metadata.get("output_tokens") is not None
+                else None,
+                estimated_cost=metadata.get("estimated_cost_usd"),
+                reported_cost=metadata.get("reported_cost_usd"),
+            )
+            changed = self.conn.execute(
+                "UPDATE benchmark_model_calls SET status='completed',response=%s,metadata=%s WHERE trial_id=%s AND sequence=%s AND status='pending'",
+                (
+                    Jsonb(
+                        ModelMessagesTypeAdapter.dump_python([response], mode="json")
+                    ),
+                    Jsonb(metadata),
+                    self.trial_id,
+                    sequence,
+                ),
+            )
+            if changed.rowcount != 1:
+                raise ProviderFailure("model_request_already_terminal")
 
     def fail(self, sequence, category, metadata=None):
-        self.conn.execute(
-            "UPDATE benchmark_model_calls SET status='failed',metadata=%s WHERE trial_id=%s AND sequence=%s",
-            (Jsonb({"error": category, **(metadata or {})}), self.trial_id, sequence),
-        )
+        with self.conn.transaction():
+            reconcile_request(
+                self.conn,
+                self.trial_id,
+                sequence,
+            )
+            if category == "rate_limit":
+                record_rate_limit(
+                    self.conn,
+                    self.trial_id,
+                    (metadata or {}).get("rate_limits", {}).get("retry-after", 0),
+                )
+            changed = self.conn.execute(
+                "UPDATE benchmark_model_calls SET status='failed',metadata=%s WHERE trial_id=%s AND sequence=%s AND status='pending'",
+                (
+                    Jsonb({"error": category, **(metadata or {})}),
+                    self.trial_id,
+                    sequence,
+                ),
+            )
+            if changed.rowcount != 1:
+                raise ProviderFailure("model_request_already_terminal")
 
     def metadata(self):
         return [
@@ -328,31 +383,29 @@ async def run_llm(context, configuration, tool_call, journal, model_factory=None
     try:
         while True:
             sequence = requests + 1
+            input_bound = (
+                len(ModelMessagesTypeAdapter.dump_json(messages)) * 4
+                + len(json.dumps([t.parameters_json_schema for t in tools])) * 4
+                + 2048
+            )
+            reserve_tokens = input_bound + config.max_output_tokens
+            reserve_cost = cost(input_bound, config.max_output_tokens, config)
+            if (
+                requests >= config.max_requests
+                or used_tokens + reserve_tokens > config.max_tokens
+                or spent + reserve_cost > config.max_estimated_cost_usd
+            ):
+                if retrying_rate_limit:
+                    raise ProviderFailure("rate_limit")
+                raise AgentLimit("model budget exhausted")
             replay = (
-                journal.reserve(sequence) if sequence <= config.max_requests else None
+                journal.reserve(sequence, reserve_tokens, reserve_cost)
+                if isinstance(journal, Journal)
+                else journal.reserve(sequence)
             )
             if replay:
                 response, metadata = replay
             else:
-                input_bound = (
-                    len(ModelMessagesTypeAdapter.dump_json(messages)) * 4
-                    + len(json.dumps([t.parameters_json_schema for t in tools])) * 4
-                    + 2048
-                )
-                reserve_tokens = input_bound + config.max_output_tokens
-                reserve_cost = cost(input_bound, config.max_output_tokens, config)
-                if (
-                    requests >= config.max_requests
-                    or used_tokens + reserve_tokens > config.max_tokens
-                    or spent + reserve_cost > config.max_estimated_cost_usd
-                ):
-                    if retrying_rate_limit:
-                        if sequence <= config.max_requests:
-                            journal.fail(sequence, "rate_limit")
-                        raise ProviderFailure("rate_limit")
-                    if sequence <= config.max_requests:
-                        journal.fail(sequence, "budget_exhausted")
-                    raise AgentLimit("model budget exhausted")
                 started = time.perf_counter()
                 with tracer.start_as_current_span(
                     "benchmark.model.request",

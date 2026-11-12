@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "StudyCreate",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {"const": "study-create-v1"},
+    "plan_id": {"type": "string", "minLength": 1, "maxLength": 128}
+  },
+  "required": ["schema_version", "plan_id"]
+}

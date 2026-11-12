@@ -32,22 +32,76 @@ services:
       interval: 2s
       timeout: 5s
       retries: 60
+  temporal-namespace:
+    image: temporalio/temporal:1.9.1
+    depends_on:
+      temporal: {condition: service_healthy}
+    command: ["operator", "namespace", "update", "--address", "temporal:7233", "--namespace", "default", "--retention", "168h"]
+  jaeger-volume:
+    image: postgres:16.14-alpine
+    user: "0:0"
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["mkdir -p /storage/key /storage/data && chown -R 10001:10001 /storage"]
+    volumes: ["jaeger:/storage"]
   jaeger:
     image: jaegertracing/all-in-one:1.76.0
-    environment: {COLLECTOR_OTLP_ENABLED: "true"}
+    depends_on:
+      jaeger-volume: {condition: service_completed_successfully}
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+      SPAN_STORAGE_TYPE: badger
+      BADGER_EPHEMERAL: "false"
+      BADGER_DIRECTORY_KEY: /storage/key
+      BADGER_DIRECTORY_VALUE: /storage/data
+      BADGER_SPAN_STORE_TTL: 168h
     ports: ["127.0.0.1:${AGENTPROOF_JAEGER_PORT:-16686}:16686", "127.0.0.1:${AGENTPROOF_OTLP_PORT:-4318}:4318"]
+    volumes: ["jaeger:/storage"]
+  otel-queue-volume:
+    image: postgres:16.14-alpine
+    user: "0:0"
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["mkdir -p /var/lib/otelcol/queue && chown -R 10001:10001 /var/lib/otelcol"]
+    volumes: ["otel-queue:/var/lib/otelcol"]
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.137.0
+    command: ["--config=/etc/otelcol/collector.yaml"]
+    depends_on:
+      jaeger: {condition: service_started}
+      otel-queue-volume: {condition: service_completed_successfully}
+    volumes:
+      - ./infra/otel-collector.yaml:/etc/otelcol/collector.yaml:ro
+      - otel-queue:/var/lib/otelcol
+    ports: ["127.0.0.1:${AGENTPROOF_COLLECTOR_PORT:-4320}:4318"]
+    mem_limit: 256m
+    healthcheck:
+      test: ["CMD", "/otelcol-contrib", "validate", "--config=/etc/otelcol/collector.yaml"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+  migrate:
+    build: {context: ., dockerfile: Dockerfile.dev, target: api}
+    command: ["/api-migrate"]
+    environment:
+      DATABASE_URL: postgresql://agentproof:agentproof@postgres:5432/agentproof
+    depends_on:
+      postgres: {condition: service_healthy}
   api:
     build: {context: ., dockerfile: Dockerfile.dev, target: api}
     environment:
-      DATABASE_URL: postgresql://agentproof:agentproof@postgres:5432/agentproof
+      DATABASE_URL: postgresql://agentproof_runtime:agentproof_runtime_local_only@postgres:5432/agentproof
+      AGENTPROOF_MIGRATIONS_EXTERNAL: "1"
       TEMPORAL_ADDRESS: temporal:7233
-      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
+      AGENTPROOF_TASK_QUEUE: ${AGENTPROOF_TASK_QUEUE:-agentproof-v1}
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
       AGENTPROOF_API_TOKEN: ${AGENTPROOF_API_TOKEN:?Set AGENTPROOF_API_TOKEN to a random local secret}
     ports: ["127.0.0.1:${AGENTPROOF_API_PORT:-8080}:8080"]
     depends_on:
       postgres: {condition: service_healthy}
+      migrate: {condition: service_completed_successfully}
       temporal: {condition: service_healthy}
+      temporal-namespace: {condition: service_completed_successfully}
       jaeger: {condition: service_started}
+      otel-collector: {condition: service_started}
     healthcheck:
       test:
         - CMD-SHELL
@@ -60,9 +114,10 @@ services:
   worker:
     build: {context: ., dockerfile: Dockerfile.dev, target: worker}
     environment:
-      DATABASE_URL: postgresql://agentproof:agentproof@postgres:5432/agentproof
+      DATABASE_URL: postgresql://agentproof_runtime:agentproof_runtime_local_only@postgres:5432/agentproof
       TEMPORAL_ADDRESS: temporal:7233
-      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
+      AGENTPROOF_TASK_QUEUE: ${AGENTPROOF_TASK_QUEUE:-agentproof-v1}
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
     depends_on:
       api: {condition: service_healthy}
   web:
@@ -82,9 +137,9 @@ services:
     profiles: [verification]
     build: {context: ., dockerfile: Dockerfile.dev, target: verify}
     environment:
-      DATABASE_URL: postgresql://agentproof:agentproof@postgres:5432/agentproof
+      DATABASE_URL: postgresql://agentproof_runtime:agentproof_runtime_local_only@postgres:5432/agentproof
       TEMPORAL_ADDRESS: temporal:7233
-      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
       AGENTPROOF_API_TOKEN: ${AGENTPROOF_API_TOKEN:?Set AGENTPROOF_API_TOKEN to a random local secret}
       TEST_DATABASE_URL: postgresql://agentproof:agentproof@postgres:5432/agentproof_test
       TEST_TEMPORAL_ADDRESS: temporal:7233
@@ -99,3 +154,5 @@ services:
 volumes:
   postgres:
   temporal:
+  jaeger:
+  otel-queue:

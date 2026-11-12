@@ -55,17 +55,19 @@ type datasetAsset struct {
 	Scenarios []json.RawMessage `json:"scenarios"`
 }
 type benchmarkManifest struct {
-	SchemaVersion     string              `json:"schema_version"`
-	ID                string              `json:"id"`
-	Dataset           contracts.Reference `json:"dataset"`
-	Agent             contracts.Reference `json:"agent"`
-	Evaluator         contracts.Reference `json:"evaluator"`
-	ToolSchema        contracts.Reference `json:"tool_schema"`
-	ToolSchemaVersion string              `json:"tool_schema_version"`
-	Split             string              `json:"split"`
-	Trials            int                 `json:"trials"`
-	ScenarioIDs       []string            `json:"scenario_ids"`
-	Traceparent       string              `json:"traceparent"`
+	SchemaVersion     string               `json:"schema_version"`
+	ID                string               `json:"id"`
+	Dataset           contracts.Reference  `json:"dataset"`
+	Agent             contracts.Reference  `json:"agent"`
+	Evaluator         contracts.Reference  `json:"evaluator"`
+	ToolSchema        contracts.Reference  `json:"tool_schema"`
+	ToolSchemaVersion string               `json:"tool_schema_version"`
+	Split             string               `json:"split"`
+	Trials            int                  `json:"trials"`
+	ScenarioIDs       []string             `json:"scenario_ids"`
+	Traceparent       string               `json:"traceparent"`
+	StudyID           string               `json:"study_id,omitempty"`
+	StudyPlan         *contracts.Reference `json:"study_plan,omitempty"`
 }
 
 func validateAsset(schemaName string, content json.RawMessage) error {
@@ -148,6 +150,9 @@ func (s *Server) publishDataset(ctx context.Context, ref contracts.Reference) er
 	return nil
 }
 func (s *Server) benchmarkRoutes(r chi.Router) {
+	r.Post("/api/v2/studies", s.createStudy)
+	r.Get("/api/v2/studies/{id}", s.inspectStudy)
+	r.Post("/api/v2/studies/{id}/cancel", s.cancelStudy)
 	r.Get("/api/v2/datasets", s.datasets)
 	r.Get("/api/v2/agents", s.agents)
 	r.Post("/api/v2/evaluations", s.createBenchmark)
@@ -421,7 +426,7 @@ func (s *Server) createBenchmark(w http.ResponseWriter, r *http.Request) {
 		toolVersion = "support-tools-v2"
 		manifestVersion = "3.0"
 	}
-	manifest := benchmarkManifest{manifestVersion, id.String(), dataset, agent, evaluator, toolSchema, toolVersion, input.Split, input.Trials, ids, carrier.Get("traceparent")}
+	manifest := benchmarkManifest{manifestVersion, id.String(), dataset, agent, evaluator, toolSchema, toolVersion, input.Split, input.Trials, ids, carrier.Get("traceparent"), "", nil}
 	body, _ := json.Marshal(manifest)
 	if _, err = tx.Exec(r.Context(), "INSERT INTO benchmark_evaluations(id,manifest) VALUES($1,$2)", id.String(), body); err != nil {
 		problem(w, 503, "cannot persist evaluation")
@@ -599,6 +604,9 @@ func (t TemporalStarter) StartBenchmark(ctx context.Context, id string) error {
 		return nil
 	}
 	return err
+}
+func (t TemporalStarter) CancelBenchmark(ctx context.Context, id string) error {
+	return t.Client.CancelWorkflow(ctx, "benchmark-"+id, "")
 }
 func (s *Server) DispatchBenchmarks(ctx context.Context) {
 	starter, ok := s.Starter.(interface {

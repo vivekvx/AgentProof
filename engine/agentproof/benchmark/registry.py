@@ -3,7 +3,12 @@ import json
 import os
 from pathlib import Path
 
-from .contracts import Dataset, EvaluationManifest, parse_agent_configuration
+from .contracts import (
+    Dataset,
+    EvaluationManifest,
+    StudyEvaluationManifest,
+    parse_agent_configuration,
+)
 from .interaction_contracts import (
     InteractionAgentConfiguration,
     InteractionDataset,
@@ -44,6 +49,35 @@ def agent(agent_id):
 
 
 def validate_snapshot(manifest):
+    if manifest.get("schema_version") == "5.0":
+        StudyEvaluationManifest.model_validate(manifest)
+        plan = manifest["study_plan"]
+        content = plan["content"]
+        if (
+            plan["id"] != content.get("id")
+            or plan["version"] != content.get("version")
+            or content.get("schema_version") != "experiment-plan-v1"
+            or manifest["dataset"]["sha256"] != content.get("dataset", {}).get("sha256")
+            or manifest["evaluator"]["sha256"]
+            != content.get("evaluator", {}).get("sha256")
+            or manifest["tool_schema"]["sha256"]
+            != content.get("tool_schema", {}).get("sha256")
+            or not any(
+                p.get("id") == manifest["agent"]["id"]
+                and p.get("sha256") == manifest["agent"]["sha256"]
+                for p in content.get("profiles", [])
+            )
+            or manifest["scenario_ids"] != content.get("scenario_ids")
+            or manifest["trials"] != content.get("trials_per_scenario")
+            or manifest["split"] != content.get("split")
+        ):
+            raise ValueError("study manifest differs from frozen plan")
+        original = dict(manifest)
+        original.pop("study_id")
+        original.pop("study_plan")
+        original["schema_version"] = "2.0"
+        validate_snapshot(original)
+        return
     if manifest.get("dataset", {}).get("version") == 6:
         InteractionManifest.model_validate(manifest)
         if manifest["dataset"]["id"] != "customer-support":

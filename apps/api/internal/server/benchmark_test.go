@@ -31,7 +31,7 @@ func TestBenchmarkContractsAndInput(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	for _, body := range []string{`{}`, `{"dataset_id":"customer-support","dataset_version":2,"agent_id":"support-safe","agent_version":1,"trials":null}`, `{"dataset_id":"customer-support","dataset_version":2,"agent_id":"support-safe","agent_version":1,"trials":true}`, `{"dataset_id":"customer-support","dataset_version":2,"agent_id":"support-safe","agent_version":1,"scenario_ids":null}`, `{"dataset_id":"customer-support","dataset_version":2,"agent_id":"support-safe","agent_version":1,"trials":6}`, `{"dataset_id":"customer-support","dataset_version":2,"agent_id":"support-safe","agent_version":1,"seed":42}`} {
+	for _, body := range []string{`{}`, `{"dataset_id":"customer-support","dataset_version":2,"agent_id":"support-safe","agent_version":1,"trials":null}`, `{"dataset_id":"customer-support","dataset_version":2,"agent_id":"support-safe","agent_version":1,"trials":true}`, `{"dataset_id":"customer-support","dataset_version":2,"agent_id":"support-safe","agent_version":1,"scenario_ids":null}`, `{"dataset_id":"customer-support","dataset_version":2,"agent_id":"support-safe","agent_version":1,"trials":6}`, `{"dataset_id":"customer-support","dataset_version":2,"agent_id":"support-safe","agent_version":1,"seed":42}`, `{"dataset_id":"customer-support","dataset_version":2,"agent_id":"support-safe","agent_version":1,"callback_url":"http://169.254.169.254/latest/meta-data"}`} {
 		if _, err := decodeBenchmark(httptest.NewRecorder(), httptest.NewRequest("POST", "/", strings.NewReader(body))); err == nil {
 			t.Fatal("accepted invalid benchmark configuration", body)
 		}

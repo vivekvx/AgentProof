@@ -25,7 +25,13 @@ from .contracts import (
     parse_agent_configuration,
 )
 from .evaluator import evaluate
-from .llm import Journal, ProviderFailure, run_llm
+from .experiment_budget import (
+    BudgetExceeded,
+    ReservationConflict,
+    close_pending_requests,
+    require_study_binding,
+)
+from .llm import Journal, ProviderFailure, StudyBudgetFailure, run_llm
 from .metrics import summarize
 from .registry import validate_snapshot
 from .simulator import AgentLimit, OrderSimulator, TrialStopped
@@ -98,7 +104,11 @@ def prepare_external_trial(trial_id, attempt, dsn=None):
             "run_id": str(evaluation_id),
             "trial_id": str(trial_id),
             "scenario_id": scenario.id,
-            "request": scenario.request.text,
+            "request": (
+                f"{scenario.request.text}\n"
+                f"Order ID: {scenario.request.order_id}\n"
+                f"Customer ID: {scenario.request.customer_id}"
+            ),
             "tools": [
                 {
                     "name": name,
@@ -191,6 +201,10 @@ async def _execute_trial(trial_id, dsn, attempt):
             if published != raw:
                 raise ValueError("trial scenario differs from published dataset")
             config = parse_agent_configuration(manifest["agent"]["content"])
+            try:
+                require_study_binding(conn, trial_id, manifest)
+            except (BudgetExceeded, ReservationConflict) as error:
+                raise StudyBudgetFailure(str(error)) from None
             if config.execution_mode == "external":
                 raise ValueError(
                     "external trial must use the Temporal session lifecycle"
@@ -262,7 +276,13 @@ async def _execute_trial(trial_id, dsn, attempt):
                     else:
                         outcome = await run_reference(public, config, simulator.call)
             except ProviderFailure as error:
-                provider_error = str(error)
+                if str(error) == "interrupted_unknown_usage":
+                    execution_error = "infrastructure"
+                else:
+                    provider_error = str(error)
+                outcome = AgentOutcome(resolution="blocked")
+            except StudyBudgetFailure:
+                execution_error = "infrastructure"
                 outcome = AgentOutcome(resolution="blocked")
             except TimeoutError:
                 outcome = AgentOutcome(resolution="blocked")
@@ -398,6 +418,7 @@ async def _execute_trial(trial_id, dsn, attempt):
                 span.set_attribute(
                     "agentproof.failure_category", result.failure_category or "none"
                 )
+                close_pending_requests(conn, trial_id)
                 conn.execute(
                     "UPDATE benchmark_trials SET status='completed',completed_at=clock_timestamp(),result=%s,agent_outcome=%s WHERE id=%s",
                     (Jsonb(result.model_dump()), Jsonb(outcome.model_dump()), trial_id),
@@ -421,6 +442,7 @@ def fail_trial(
 
             return fail_locked(conn, trial_id, category)
         execution_provenance.record(conn, trial_id, "benchmark", manifest, scenario)
+        close_pending_requests(conn, trial_id)
         if manifest["evaluator"]["version"] == 4:
             result = _validated_result(conn, trial_id, execution_error=category)
             conn.execute(
@@ -519,6 +541,8 @@ def finalize(evaluation_id, category=None, message="", dsn=None):
             "SELECT manifest,result,created_at FROM benchmark_evaluations WHERE id=%s FOR UPDATE",
             (evaluation_id,),
         ).fetchone()
+        if row is None:
+            raise ValueError("unknown evaluation")
         if row[1] is not None:
             return row[1]
         execution_provenance.record(conn, evaluation_id, "evaluation", row[0])
@@ -611,6 +635,7 @@ def _fail_locked(conn, trial_id, category, message):
 
         return fail_locked(conn, trial_id, category)
     execution_provenance.record(conn, trial_id, "benchmark", row[3], row[2])
+    close_pending_requests(conn, trial_id)
     if row[3]["evaluator"]["version"] == 4:
         result = _validated_result(conn, trial_id, execution_error=category)
         conn.execute(

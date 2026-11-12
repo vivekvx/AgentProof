@@ -30,6 +30,7 @@ SCHEMAS = {
         )
     },
     "v3/AgentConfiguration.schema.json": benchmark.AgentConfigurationV3,
+    "v5/StudyEvaluationManifest.schema.json": benchmark.StudyEvaluationManifest,
     **{
         f"v3/{name}.schema.json": getattr(interaction_contracts, name)
         for name in (

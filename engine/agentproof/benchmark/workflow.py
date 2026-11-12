@@ -285,6 +285,15 @@ class BenchmarkWorkflow:
             )
             raise
         except ActivityError as error:
+            if isinstance(error.cause, ApplicationError) and error.cause.type in {
+                "EvaluationMissing",
+                "TrialMissing",
+            }:
+                raise ApplicationError(
+                    "evaluation_evidence_missing",
+                    type="EvaluationEvidenceMissing",
+                    non_retryable=True,
+                ) from None
             if is_cancelled_exception(error):
                 await asyncio.shield(
                     workflow.execute_activity(

@@ -29,6 +29,11 @@ func env(key, fallback string) string {
 func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	listenAddress := env("API_ADDRESS", "127.0.0.1:8080")
+	apiToken := os.Getenv("AGENTPROOF_API_TOKEN")
+	if err := server.ValidateListenSecurity(listenAddress, apiToken); err != nil {
+		return err
+	}
 	options := []sdktrace.TracerProviderOption{sdktrace.WithResource(resource.NewWithAttributes("", attribute.String("service.name", "agentproof-api")))}
 	if os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT") != "" {
 		exporter, err := otlptracehttp.New(ctx)
@@ -46,8 +51,10 @@ func run() error {
 		return err
 	}
 	defer pool.Close()
-	if err = db.Migrate(ctx, pool); err != nil {
-		return err
+	if os.Getenv("AGENTPROOF_MIGRATIONS_EXTERNAL") != "1" {
+		if err = db.Migrate(ctx, pool); err != nil {
+			return err
+		}
 	}
 	opts, err := server.TemporalOptions(env("TEMPORAL_ADDRESS", "localhost:7233"))
 	if err != nil {
@@ -58,15 +65,10 @@ func run() error {
 		return err
 	}
 	defer temporal.Close()
-	api := &server.Server{Pool: pool, Starter: server.TemporalStarter{Client: temporal}}
+	api := &server.Server{Pool: pool, Starter: server.TemporalStarter{Client: temporal}, BearerToken: apiToken, RequireAuth: true}
 	go api.Dispatch(ctx)
 	go api.DispatchBenchmarks(ctx)
-	listenAddress := env("API_ADDRESS", "127.0.0.1:8080")
-	apiToken := os.Getenv("AGENTPROOF_API_TOKEN")
-	if err := server.ValidateListenSecurity(listenAddress, apiToken); err != nil {
-		return err
-	}
-	api.BearerToken = apiToken
+	go api.ExpireStudies(ctx)
 	httpServer := &http.Server{Addr: listenAddress, Handler: api.Routes(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 15 * time.Second, IdleTimeout: 60 * time.Second}
 	go func() {
 		<-ctx.Done()

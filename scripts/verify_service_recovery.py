@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import os
 import subprocess
 import time
 import uuid
@@ -10,24 +11,26 @@ from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--context", default="default")
+parser.add_argument("--context", help="Docker context; default is the active context")
 parser.add_argument("--project", required=True)
 parser.add_argument("--env-file", default="infra/verification.env")
 parser.add_argument("--base-url", default="http://127.0.0.1:8081")
 args = parser.parse_args()
 if not args.project.startswith("agentproof"):
     parser.error("Use a dedicated AgentProof test project")
+control_token = os.environ.get("AGENTPROOF_API_TOKEN", "")
+if len(control_token) < 32:
+    parser.error("Set a local AGENTPROOF_API_TOKEN before recovery verification")
 compose = [
     "docker",
-    "--context",
-    args.context,
+    *(["--context", args.context] if args.context else []),
     "compose",
     "--env-file",
     args.env_file,
     "-p",
     args.project,
 ]
-evidence = Path(".local/implementation-02")
+evidence = Path(".local/verification/recovery")
 evidence.mkdir(parents=True, exist_ok=True)
 
 
@@ -37,6 +40,7 @@ def http(path, key=None):
         data=b'{"agent":"safe"}' if key else None,
         headers={
             "Content-Type": "application/json",
+            "Authorization": f"Bearer {control_token}",
             **({"Idempotency-Key": key} if key else {}),
         },
     )
