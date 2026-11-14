@@ -1,0 +1,22 @@
+{
+  "schema_version": "3.0",
+  "id": "my-http-agent",
+  "version": 1,
+  "title": "My independent HTTP agent",
+  "policy": "external",
+  "model_configuration": {
+    "provider": "offline",
+    "model": "external-agent",
+    "external_calls": false
+  },
+  "prompt": "This configuration identifies an independently implemented agent. The agent receives only a public task envelope and calls the HTTP/JSON session API.",
+  "prompt_version": "developer-agent-v1",
+  "tool_schema_version": "support-tools-v1",
+  "max_retries": 0,
+  "external_session": {
+    "execution_mode": "external",
+    "transport": "http-json",
+    "session_ttl_seconds": 120,
+    "credential_scope": "single-trial"
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "schema_version": "agentproof-local-backup-v1",
+  "source_database_url": "postgresql://agentproof:REPLACE_ME@127.0.0.1:55433/agentproof",
+  "backup_directory": "/absolute/private/path/agentproof-backups",
+  "recipient_certificate": "/absolute/private/path/agentproof-backup-recipient.pem",
+  "key_recovery": {
+    "method": "manual",
+    "instructions": "Keep the matching private key outside Git and record its recovery location with the owner."
+  },
+  "off_host_destination": null
+}

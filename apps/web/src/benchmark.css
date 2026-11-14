@@ -31,6 +31,21 @@
 .scenario-selection {
   margin: 20px 0;
 }
+.external-agent-guide {
+  margin: 14px 0 18px;
+  padding: 12px;
+  border: 1px solid #326a55;
+  border-left: 3px solid #6ee7b7;
+  background: #12251f;
+}
+.external-agent-guide strong {
+  font-size: 11px;
+  color: #a7f3d0;
+}
+.external-agent-guide p {
+  margin: 6px 0 0;
+  font-size: 11px;
+}
 .scenario-selection > label {
   display: flex;
   align-items: flex-start;
@@ -150,8 +165,12 @@ progress {
   font-size: 10px;
 }
 .evidence-panel,
-.comparison-panel {
+.comparison-panel,
+.external-session-panel {
   margin-top: 24px;
+}
+.external-session-panel > p {
+  max-width: 760px;
 }
 .evidence-panel details {
   padding-bottom: 14px;

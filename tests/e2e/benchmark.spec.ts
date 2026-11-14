@@ -250,3 +250,51 @@ test("benchmark API rejects invalid configuration and incompatible selections", 
     ).status(),
   ).toBe(409);
 });
+
+test("external agent configuration issues a scoped session envelope", async ({ page }) => {
+  const external = {
+    id: "my-http-agent",
+    version: 1,
+    content: {
+      title: "My independent HTTP agent",
+      policy: "external",
+      prompt_version: "developer-agent-v1",
+      tool_schema_version: "support-tools-v1",
+      model_configuration: { provider: "offline", model: "external-agent", external_calls: false },
+      external_session: { transport: "http-json", session_ttl_seconds: 120 },
+    },
+  };
+  const dataset = [{
+    id: "customer-support", version: 5, title: "Customer support v5", sha256: "dataset",
+    scenarios: [{ id: "cs-001", title: "Cancel an order", split: "development", category: "cancellation" }],
+    review: "fixture",
+  }];
+  const evaluation = {
+    id: "external-evaluation", status: "running", created_at: "2026-11-13T00:00:00Z",
+    manifest: { agent: external, dataset: { id: "customer-support", version: 5, sha256: "dataset" }, split: "development", trials: 1, scenario_ids: ["cs-001"] },
+    metrics: null,
+    trials: [{ id: "external-trial", scenario_id: "cs-001", trial_index: 1, status: "running", result: null }],
+  };
+  await page.route("**/api/v2/datasets", async (route) => route.fulfill({ json: dataset }));
+  await page.route("**/api/v2/agents", async (route) => route.fulfill({ json: [external] }));
+  await page.route("**/api/v2/evaluations", async (route) => {
+    if (route.request().method() === "POST") await route.fulfill({ status: 202, json: { id: evaluation.id } });
+    else await route.fulfill({ json: [evaluation] });
+  });
+  await page.route("**/api/v2/evaluations/external-evaluation", async (route) => route.fulfill({ json: evaluation }));
+  await page.route("**/api/v2/external/sessions/external-trial", async (route) => route.fulfill({
+    status: 201,
+    json: {
+      credential: "trial-only-credential",
+      task: { trial_id: "external-trial", run_id: evaluation.id, scenario_id: "cs-001", deadline_unix_ms: 1, request: "Cancel order", tools: [] },
+    },
+  }));
+  await page.goto("/");
+  await page.getByRole("tab", { name: "Benchmarks", exact: true }).click();
+  await page.getByLabel("Agent configuration").selectOption(external.id);
+  await expect(page.getByText("Independent agent selected")).toBeVisible();
+  await page.getByRole("button", { name: "Run benchmark", exact: true }).click();
+  await page.getByRole("button", { name: "Issue session", exact: true }).click();
+  await expect(page.getByTestId("external-session-envelope")).toContainText("trial-only-credential");
+  await expect(page.getByText("AgentProof does not accept the agent's claimed verdict.")).toBeVisible();
+});

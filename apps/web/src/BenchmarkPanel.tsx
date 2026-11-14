@@ -20,6 +20,8 @@ type Agent = {
   content: {
     title: string;
     model_configuration?: Record<string, unknown>;
+    policy?: string;
+    external_session?: { transport?: string; session_ttl_seconds?: number } | null;
     prompt_version: string;
     tool_schema_version: string;
   };
@@ -156,6 +158,17 @@ type Detail = {
     transport_requests?: number;
   }[];
 };
+type ExternalSession = {
+  credential: string;
+  task: {
+    trial_id: string;
+    run_id: string;
+    scenario_id: string;
+    deadline_unix_ms: number;
+    tools: { name: string; description: string; input_schema: Record<string, unknown> }[];
+    request: string;
+  };
+};
 type Comparison = {
   comparison_kind?: "offline_control" | "real_model" | "mixed_agents";
   baseline_model?: string;
@@ -234,7 +247,9 @@ export function BenchmarkPanel() {
     [candidate, setCandidate] = useState(""),
     [comparison, setComparison] = useState<Comparison | null>(null),
     [comparing, setComparing] = useState(false),
-    [filter, setFilter] = useState("all");
+    [filter, setFilter] = useState("all"),
+    [externalSession, setExternalSession] = useState<ExternalSession | null>(null),
+    [issuingSession, setIssuingSession] = useState("");
   useEffect(() => {
     let active = true;
     void Promise.all([api<Dataset[]>("/datasets"), api<Agent[]>("/agents")])
@@ -301,6 +316,14 @@ export function BenchmarkPanel() {
   const compatibleAgents = agents.filter((a) =>
     a.content.tool_schema_version === (ds?.version === 6 ? "support-tools-v2" : "support-tools-v1")
   );
+  useEffect(() => {
+    if (
+      compatibleAgents.length > 0 &&
+      !compatibleAgents.some((candidate) => candidate.id === agent)
+    ) {
+      setAgent(compatibleAgents[0].id);
+    }
+  }, [agent, dataset, agents]);
   const available =
     ds?.scenarios.filter((s) => split === "all" || s.split === split) ?? [];
   const total = evaluation
@@ -311,6 +334,7 @@ export function BenchmarkPanel() {
     setSelected(id);
     setEvaluation(null);
     setDetail(null);
+    setExternalSession(null);
   }
   async function start() {
     setStarting(true);
@@ -349,6 +373,19 @@ export function BenchmarkPanel() {
       setError(String(e));
     }
   }
+  async function issueExternalSession(id: string) {
+    setIssuingSession(id);
+    setError("");
+    try {
+      setExternalSession(
+        await api<ExternalSession>(`/external/sessions/${id}`, { method: "POST" }),
+      );
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setIssuingSession("");
+    }
+  }
   async function compare() {
     setComparing(true);
     setError("");
@@ -371,6 +408,10 @@ export function BenchmarkPanel() {
     }
   }
   const metrics = evaluation?.metrics;
+  const selectedAgent = agents.find((item) => item.id === agent);
+  const externalAgent = selectedAgent?.content.policy === "external";
+  const evaluationUsesExternalAgent =
+    evaluation?.manifest.agent.content.policy === "external";
   return (
     <div className="benchmark" data-testid="benchmark-panel">
       <div className="workspace">
@@ -402,10 +443,23 @@ export function BenchmarkPanel() {
             {compatibleAgents.map((a) => (
               <option key={a.id} value={a.id}>
                 {a.content.title}
+                {a.content.policy === "external" ? " · external HTTP/JSON" : ""}
               </option>
             ))}
           </select>
-          <details><summary>Model configuration and limits</summary><pre>{JSON.stringify(agents.find(a => a.id === agent)?.content.model_configuration, null, 2)}</pre><p>Credentials stay on the worker. Budgets apply to each trial, including the capability probe.</p></details>
+          {externalAgent && (
+            <aside className="external-agent-guide">
+              <strong>Independent agent selected</strong>
+              <p>
+                AgentProof will issue one scoped session per trial. Start the
+                benchmark, then issue a session from the result table and pass
+                its task plus credential to your agent. The credential expires
+                and is shown only for this browser session; it is not persisted
+                by the dashboard.
+              </p>
+            </aside>
+          )}
+          <details><summary>Model configuration and limits</summary><pre>{JSON.stringify(selectedAgent?.content.model_configuration, null, 2)}</pre><p>Credentials stay on the worker. Budgets apply to each trial, including the capability probe.</p></details>
           <label htmlFor="split">Scenario split</label>
           <select
             id="split"
@@ -645,6 +699,7 @@ export function BenchmarkPanel() {
                       <th>Outcome</th>
                       <th>Failure</th>
                       <th>Evidence</th>
+                      {evaluationUsesExternalAgent && <th>Agent session</th>}
                     </tr>
                   </thead>
                   <tbody>
@@ -674,6 +729,21 @@ export function BenchmarkPanel() {
                               Inspect <ChevronRight size={12} />
                             </button>
                           </td>
+                          {evaluationUsesExternalAgent && (
+                            <td>
+                              {t.result ? (
+                                <span className="hint">Terminal</span>
+                              ) : (
+                                <button
+                                  className="inspect-button"
+                                  onClick={() => issueExternalSession(t.id)}
+                                  disabled={issuingSession === t.id}
+                                >
+                                  {issuingSession === t.id ? "Issuing…" : "Issue session"}
+                                </button>
+                              )}
+                            </td>
+                          )}
                         </tr>
                       ))}
                   </tbody>
@@ -683,6 +753,18 @@ export function BenchmarkPanel() {
           )}
         </section>
       </div>
+      {externalSession && (
+        <section className="panel external-session-panel" aria-live="polite">
+          <div className="section-label">EXTERNAL AGENT SESSION</div>
+          <h2>Pass this one-time envelope to your agent.</h2>
+          <p>
+            This credential is scoped to one trial and expires at the task
+            deadline. Do not place it in source control, browser storage, or
+            logs. AgentProof does not accept the agent's claimed verdict.
+          </p>
+          <pre data-testid="external-session-envelope">{JSON.stringify(externalSession, null, 2)}</pre>
+        </section>
+      )}
       {error && (
         <p className="error" role="alert">
           {error}

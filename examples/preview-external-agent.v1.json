@@ -1,0 +1,22 @@
+{
+  "schema_version": "3.0",
+  "id": "preview-http-agent",
+  "version": 1,
+  "title": "Preview HTTP agent (short session)",
+  "policy": "external",
+  "model_configuration": {
+    "provider": "offline",
+    "model": "external-agent",
+    "external_calls": false
+  },
+  "prompt": "A short-lived synthetic profile for self-hosted preview verification.",
+  "prompt_version": "preview-agent-v1",
+  "tool_schema_version": "support-tools-v1",
+  "max_retries": 0,
+  "external_session": {
+    "execution_mode": "external",
+    "transport": "http-json",
+    "session_ttl_seconds": 3,
+    "credential_scope": "single-trial"
+  }
+}

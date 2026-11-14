@@ -20,6 +20,7 @@ import (
 )
 
 const studyCreateBody = `{"schema_version":"study-create-v1","plan_id":"agentproof-mocked-t16"}`
+const ordinaryEvaluationBody = `{"dataset_id":"customer-support","dataset_version":5,"agent_id":"support-safe","agent_version":1,"split":"development","trials":1,"scenario_ids":["cs-001"]}`
 
 // Each case owns a fresh database, including all of its synthetic study rows.
 func auditStudyDatabase(t *testing.T) *pgxpool.Pool {
@@ -143,6 +144,47 @@ func TestStudySingleActiveAdmissionAcrossInstances(t *testing.T) {
 	}
 }
 
+func TestStudyAndOrdinaryEvaluationShareOneLocalEnvelope(t *testing.T) {
+	pool := auditStudyDatabase(t)
+	first := (&Server{Pool: pool}).Routes()
+	code, study := studyRequest(first, "POST", "/api/v2/studies", uuid.NewString(), studyCreateBody)
+	if code != 202 {
+		t.Fatalf("study create: %d %v", code, study)
+	}
+	code, ordinary := studyRequest((&Server{Pool: pool}).Routes(), "POST", "/api/v2/evaluations", uuid.NewString(), ordinaryEvaluationBody)
+	if code != 409 || ordinary["error"] != "an active study owns the local evaluation envelope" {
+		t.Fatalf("ordinary evaluation bypassed study envelope: %d %v", code, ordinary)
+	}
+	studyID := study["id"].(string)
+	result := `{"schema_version":"2.0","verdict":"INDETERMINATE","failure_category":"infrastructure"}`
+	if _, err := pool.Exec(context.Background(), "UPDATE benchmark_trials SET status='completed',result=$2 WHERE id IN (SELECT trial_id FROM benchmark_study_trials WHERE study_id=$1)", studyID, result); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(context.Background(), "UPDATE benchmark_evaluations SET status='completed',result='{\"schema_version\":\"2.0\"}' WHERE id IN (SELECT evaluation_id FROM benchmark_study_evaluations WHERE study_id=$1)", studyID); err != nil {
+		t.Fatal(err)
+	}
+	code, ordinary = studyRequest((&Server{Pool: pool}).Routes(), "POST", "/api/v2/evaluations", uuid.NewString(), ordinaryEvaluationBody)
+	if code != 202 {
+		t.Fatalf("ordinary evaluation after terminal study: %d %v", code, ordinary)
+	}
+	// The durable queued evaluation remains an admission holder after an API restart.
+	code, blocked := studyRequest((&Server{Pool: pool}).Routes(), "POST", "/api/v2/studies", uuid.NewString(), studyCreateBody)
+	if code != 409 || blocked["error"] != "an ordinary evaluation owns the local study envelope" {
+		t.Fatalf("study bypassed stale ordinary admission: %d %v", code, blocked)
+	}
+	evaluationID := ordinary["id"].(string)
+	if _, err := pool.Exec(context.Background(), "UPDATE benchmark_trials SET status='completed',result=$2 WHERE evaluation_id=$1", evaluationID, result); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(context.Background(), "UPDATE benchmark_evaluations SET status='completed',result='{\"schema_version\":\"2.0\"}' WHERE id=$1", evaluationID); err != nil {
+		t.Fatal(err)
+	}
+	code, next := studyRequest((&Server{Pool: pool}).Routes(), "POST", "/api/v2/studies", uuid.NewString(), studyCreateBody)
+	if code != 202 || next["id"] == studyID {
+		t.Fatalf("terminal ordinary evaluation did not release study admission: %d %v", code, next)
+	}
+}
+
 type blockedStudyStarter struct {
 	mu      sync.Mutex
 	calls   []string
@@ -154,6 +196,7 @@ type blockedStudyStarter struct {
 type deadlineStudyStarter struct {
 	mu    sync.Mutex
 	calls []string
+	fail  bool
 }
 
 func (s *deadlineStudyStarter) Start(context.Context, string) error { return nil }
@@ -161,6 +204,9 @@ func (s *deadlineStudyStarter) CancelBenchmark(_ context.Context, id string) err
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.calls = append(s.calls, id)
+	if s.fail {
+		return errors.New("synthetic cancellation delivery failure")
+	}
 	return nil
 }
 
@@ -203,6 +249,51 @@ func TestStudyDeadlineCancelsAndRetriesAfterRestart(t *testing.T) {
 	code, _ = studyRequest(restarted.Routes(), "POST", "/api/v2/studies", uuid.NewString(), studyCreateBody)
 	if code != 409 {
 		t.Fatalf("expired active study allowed admission: %d", code)
+	}
+}
+
+func TestStudyDeadlineExposesDeliveryAndChildTerminalState(t *testing.T) {
+	pool := auditStudyDatabase(t)
+	code, body := studyRequest((&Server{Pool: pool}).Routes(), "POST", "/api/v2/studies", uuid.NewString(), studyCreateBody)
+	if code != 202 {
+		t.Fatalf("create: %d %v", code, body)
+	}
+	id := body["id"].(string)
+	if _, err := pool.Exec(context.Background(), "UPDATE benchmark_studies SET created_at=clock_timestamp()-interval '181 seconds' WHERE id=$1", id); err != nil {
+		t.Fatal(err)
+	}
+	failed := &deadlineStudyStarter{fail: true}
+	if err := (&Server{Pool: pool, Starter: failed}).expireStudiesOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	code, observed := studyRequest((&Server{Pool: pool}).Routes(), "GET", "/api/v2/studies/"+id, "", "")
+	if code != 200 {
+		t.Fatalf("inspect failed deadline: %d %v", code, observed)
+	}
+	cancellation := observed["cancellation"].(map[string]any)
+	if cancellation["deadline_reached_at"] == nil || cancellation["cancellation_requested_at"] == nil || cancellation["temporal_cancellation_acknowledged"] != false || cancellation["child_workflows_terminal"] != false || cancellation["study_terminal"] != false {
+		t.Fatalf("deadline state is misleading: %v", cancellation)
+	}
+	accepted := &deadlineStudyStarter{}
+	if err := (&Server{Pool: pool, Starter: accepted}).expireStudiesOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	_, observed = studyRequest((&Server{Pool: pool}).Routes(), "GET", "/api/v2/studies/"+id, "", "")
+	cancellation = observed["cancellation"].(map[string]any)
+	if cancellation["temporal_requests"] != float64(2) || cancellation["temporal_requests_accepted"] != float64(2) || cancellation["temporal_cancellation_acknowledged"] != true || cancellation["child_workflows_terminal"] != false {
+		t.Fatalf("delivery acknowledgement differs: %v", cancellation)
+	}
+	result := `{"schema_version":"2.0","verdict":"INDETERMINATE","failure_category":"infrastructure"}`
+	if _, err := pool.Exec(context.Background(), "UPDATE benchmark_trials SET status='completed',result=$2 WHERE id IN (SELECT trial_id FROM benchmark_study_trials WHERE study_id=$1)", id, result); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(context.Background(), "UPDATE benchmark_evaluations SET status='completed',result='{\"schema_version\":\"2.0\"}' WHERE id IN (SELECT evaluation_id FROM benchmark_study_evaluations WHERE study_id=$1)", id); err != nil {
+		t.Fatal(err)
+	}
+	_, observed = studyRequest((&Server{Pool: pool}).Routes(), "GET", "/api/v2/studies/"+id, "", "")
+	cancellation = observed["cancellation"].(map[string]any)
+	if cancellation["child_workflows_terminal"] != true || cancellation["study_terminal"] != true {
+		t.Fatalf("terminal children not exposed: %v", cancellation)
 	}
 }
 

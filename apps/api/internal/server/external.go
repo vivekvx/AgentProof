@@ -118,10 +118,6 @@ func (s *Server) externalAgentRoutes(r chi.Router) {
 }
 
 func (s *Server) createExternalSession(w http.ResponseWriter, r *http.Request) {
-	if len(s.BearerToken) < 32 {
-		problem(w, http.StatusServiceUnavailable, "external session issuance requires a configured control credential")
-		return
-	}
 	r.Body = http.MaxBytesReader(w, r.Body, 1024)
 	body, err := io.ReadAll(r.Body)
 	if err != nil || len(body) != 0 {
@@ -140,6 +136,13 @@ func (s *Server) createExternalSession(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		problem(w, http.StatusServiceUnavailable, "cannot read external trial")
+		return
+	}
+	if _, _, ok := s.hostedEvaluationAccess(w, r, evaluationID, true); !ok {
+		return
+	}
+	if len(s.BearerToken) < 32 {
+		problem(w, http.StatusServiceUnavailable, "external session issuance requires a configured service credential")
 		return
 	}
 	workflowClient, ok := s.externalWorkflow(w)

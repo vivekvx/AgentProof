@@ -11,6 +11,90 @@ The evaluator reads actual PostgreSQL state and the side-effect ledger.
 The original agents use Pydantic AI `FunctionModel`. Their provider requests stay disabled.
 These are reference behaviors, not measurements of a production AI model.
 
+## Self-hosted developer preview
+
+This is the supported Release 1 installation. It starts the dashboard, API,
+PostgreSQL, Temporal, worker, Jaeger, and OpenTelemetry Collector on loopback.
+It is a single-tenant developer installation, not a public service or hosted beta.
+
+```sh
+git clone https://github.com/vivekvx/AgentProof.git
+cd AgentProof
+cp .env.example .env
+chmod 600 .env
+printf 'AGENTPROOF_API_TOKEN=%s\n' "$(openssl rand -hex 32)" >> .env
+mkdir -p .local/agents
+cp examples/external-agent.v1.json .local/agents/my-http-agent.v1.json
+docker compose up -d --build --wait
+```
+
+Open [the dashboard](http://127.0.0.1:5173). The dashboard proxy keeps the
+local control token out of browser JavaScript. Check installation health without
+printing the token:
+
+```sh
+set -a; . ./.env; set +a
+curl --fail --silent --show-error \
+  -H "Authorization: Bearer $AGENTPROOF_API_TOKEN" \
+  http://127.0.0.1:8080/healthz
+```
+
+The copied external-agent configuration is outside the image and mounted
+read-only into the API and worker. Its filename must match its `id`, for example
+`my-http-agent.v1.json`. It identifies an independently implemented HTTP/JSON
+agent; it does not execute agent code inside AgentProof. Do not put a provider
+key, an external-agent credential, or a control token in this file.
+
+To run the included standalone protocol example, select **Benchmarks**, choose
+**My independent HTTP agent**, select one development scenario, and run it. In
+the trial table, select **Issue session**. Save the displayed JSON envelope to a
+private file and give it to your agent. For the included example:
+
+```sh
+AGENTPROOF_EXTERNAL_BASE_URL=http://127.0.0.1:8080 \
+  python3 examples/independent_http_agent.py < /private/path/session.json
+```
+
+The example in
+[`examples/independent_http_agent.py`](examples/independent_http_agent.py)
+accepts that envelope on standard input and reads `base_url` from the
+environment or envelope; it imports no
+AgentProof modules. It demonstrates the public `/agent/v1` protocol only.
+
+The dashboard shows PASS, FAIL, and INDETERMINATE separately. Select
+**Inspect** for trusted tool events, simulated effects, evaluator assertions,
+failure category, immutable asset references, and trace identity. The agent's
+completion claim is never treated as the verdict.
+
+Stop and restart an installation without removing its named volumes:
+
+```sh
+docker compose stop
+docker compose up -d --wait
+```
+
+Do not use `docker compose down -v` for a normal restart: that removes the
+local database and workflow volumes. Export a completed trial and independently
+verify it from a clean checkout using the commands in
+[Execution provenance and offline replay](#execution-provenance-and-offline-replay).
+
+For the complete offline preview check, add the short-lived synthetic profile,
+then run the verifier. It creates new synthetic evaluations only:
+
+```sh
+cp examples/preview-external-agent.v1.json .local/agents/
+docker compose up -d --force-recreate api worker
+set -a; . ./.env; set +a
+uv run --project engine --frozen python scripts/verify_self_hosted_preview.py \
+  --database-url 'postgresql://agentproof:agentproof@127.0.0.1:55432/agentproof' \
+  --compose-project agentproof
+```
+
+It verifies a correct external agent, a duplicate-effect failure, an incomplete
+session, restart persistence, bundle export, verification, and replay. The
+short session profile is only for this check; keep normal developer sessions at
+an intentional duration.
+
 ## Benchmarks
 
 Open the dashboard and select **Benchmarks**.
@@ -449,10 +533,12 @@ No cleanup command removes failed application runs.
 The supported observation is one local, single-tenant eight-slot study: two
 evaluations, eight trials, one API, and one worker. Study creation uses a
 PostgreSQL transaction advisory lock to atomically reject a second active
-study across API instances. Cancellation retains the slot until all child
-evaluations and trials are terminal; a later study can reuse the frozen plan.
-The generic benchmark API and Temporal SDK worker defaults do not enforce
-this envelope for non-study workloads. Higher capacity is unverified.
+study across API instances. The same durable lock rejects a generic evaluation
+while a study has unfinished children, and rejects a study while a generic
+evaluation is queued or running. A stale generic evaluation remains an
+admission holder after an API restart until its normal worker finalization;
+it is never silently discarded. Cancellation retains the slot until all child
+evaluations and trials are terminal. Higher capacity is unverified.
 
 | Boundary | Observed or configured value | Operator action |
 | --- | --- | --- |
@@ -524,6 +610,44 @@ matching canonical hashes for studies, evaluations, trials, evidence,
 provenance, budgets, sessions, and the v5 published dataset. Offline replay
 made no provider request.
 
+For scheduled local backups, copy `infra/backup-config.example.json` outside
+the repository, make it mode 0600, set an absolute private backup directory,
+and point it at an owner-held recipient certificate. The matching private key
+is never read by the scheduler. The configuration requires manual key-recovery
+instructions and can record, but never transfers to, an off-host destination.
+Render local macOS `launchd` schedules without installing them:
+
+```sh
+python3 scripts/render_backup_schedule.py \
+  --config /absolute/private/agentproof-backup.json \
+  --program "$PWD/scripts/local_backup.py" \
+  --output-dir /absolute/private/prepared-launchd
+python3 scripts/local_backup.py --config /absolute/private/agentproof-backup.json --cadence daily
+```
+
+The runner writes one AES-256-GCM CMS archive and a checksum manifest per UTC
+daily or monthly period. A verified artifact is reused on retry; an incomplete
+artifact fails closed. It neither prunes archives nor transfers them off-host.
+The daily 30-day and monthly 12-month selections remain review-only through
+`scripts/retention_policy.py`.
+
+The renderer records absolute Python, `pg_dump`, and `openssl` paths in each
+plist, stages replacements atomically, and is byte-idempotent. It does not call
+`launchctl`, so rendering is not installation. `launchd` calendar schedules are
+host-local and do not promise catch-up after sleep or shutdown. Check the
+matching host-local calendar (or provide its IANA time zone explicitly) before
+accepting a backup as fresh:
+
+```sh
+python3 scripts/verify_backup_freshness.py \
+  --config /absolute/private/agentproof-backup.json --cadence daily
+```
+
+The check is read-only. After the scheduled time plus its one-hour default
+grace, a missing or invalid current UTC-period archive exits nonzero for an
+operator alert. It does not make a missed archive appear, upload it, or delete
+anything.
+
 PostgreSQL archives do **not** include Temporal histories. This Compose
 deployment stores Temporal's development SQLite database in its own named
 `temporal` volume. A one-shot namespace configuration sets closed-workflow
@@ -563,7 +687,7 @@ synthetic boundary tests cover exact expiry and protected categories.
 | --- | --- | --- |
 | Published datasets, immutable results, evidence, provenance | Indefinite | Preserve failed and indeterminate runs for replay. No destructive rule is enabled; owner approval is required before any change. |
 | Temporal histories | At least 7 days after terminal state | Effective namespace setting is 604800 seconds; a coordinated terminal-history snapshot recovered. Active-history recovery is unverified. |
-| Application logs | 7 days | Docker has no time-based retention in this stack; seven-day enforcement remains open. Redact credentials before sharing. |
+| Application logs | 7 days | Compose uses Docker's `local` driver with 10 MiB and seven-file size rotation. This bounds disk use but can rotate logs before seven days; the non-destructive review marks aged verification logs and preserves `.investigation` files. Seven-day availability remains open. |
 | Traces | 7 days | Badger uses a 168-hour TTL, and a two-second probe confirmed expiry. Outage and overflow can still lose spans. |
 | Synthetic test databases | 30 days after verified review | Keep failed-run fixtures until verification is complete; deletion requires separate authorization. |
 | Backups | Daily for 30 days; monthly for 12 months | A local AES-256-GCM CMS archive decrypted and restored with matching SHA-256; scheduling and off-host key custody remain open. |
@@ -582,6 +706,17 @@ hashes matched, eight evidence chains and offline replay passed, the API read
 the completed study, a 65-event Temporal history hash matched, and 174 trace
 span identities matched. Active-workflow and queued-span recovery need
 separate proof. T14 and T19 remain separate gates.
+
+`GET /api/v2/studies/{id}` reports a cancellation object separately from the
+study status: deadline reached, cancellation requested, Temporal request
+delivery accepted, child workflows terminal, and study terminal. A successful
+Temporal request only means the service accepted the cancellation request; it
+does not mean children have observed it or terminalized. The active-work
+boundary check restarts a worker during a held provider request and verifies
+durable study identity, reservations, and one-effect-per-trial behavior. It
+records an unknown reservation and an INDETERMINATE result where delivery is
+uncertain. Restoring copied active Temporal SQLite history or a collector queue
+into a new stack remains unsupported and has no promised RTO or RPO.
 
 `Idempotency-Key` is an optional header for `POST /api/v1/runs`. Reuse the same
 key and body to recover an uncertain response. A changed agent with the same key

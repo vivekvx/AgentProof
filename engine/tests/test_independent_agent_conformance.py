@@ -232,23 +232,35 @@ async def test_independent_agent_conformance(dsn, tmp_path, monkeypatch):
     base = f"http://127.0.0.1:{port}"
     queue = "independent-agent-test-" + uuid.uuid4().hex
     api_log = (tmp_path / "api.log").open("w")
-    api = await asyncio.create_subprocess_exec(
+    api_binary = tmp_path / "agentproof-api"
+    built = await asyncio.create_subprocess_exec(
         "go",
-        "run",
+        "build",
+        "-o",
+        str(api_binary),
         "./apps/api/cmd/server",
         cwd=ROOT,
-        env={
-            **os.environ,
-            "API_ADDRESS": f"127.0.0.1:{port}",
-            "AGENTPROOF_API_TOKEN": CONTROL_TOKEN,
-            "AGENTPROOF_MODEL_CONFIG_DIR": str(profiles),
-            "AGENTPROOF_TASK_QUEUE": queue,
-            "DATABASE_URL": dsn,
-            "TEMPORAL_ADDRESS": temporal,
-        },
-        stdout=api_log,
-        stderr=asyncio.subprocess.STDOUT,
     )
+    assert await built.wait() == 0
+
+    async def start_api():
+        return await asyncio.create_subprocess_exec(
+            str(api_binary),
+            cwd=ROOT,
+            env={
+                **os.environ,
+                "API_ADDRESS": f"127.0.0.1:{port}",
+                "AGENTPROOF_API_TOKEN": CONTROL_TOKEN,
+                "AGENTPROOF_MODEL_CONFIG_DIR": str(profiles),
+                "AGENTPROOF_TASK_QUEUE": queue,
+                "DATABASE_URL": dsn,
+                "TEMPORAL_ADDRESS": temporal,
+            },
+            stdout=api_log,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+
+    api = await start_api()
     client = await Client.connect(temporal, interceptors=[TracingInterceptor()])
     evaluations = []
     credentials = []
@@ -397,6 +409,20 @@ async def test_independent_agent_conformance(dsn, tmp_path, monkeypatch):
             assert safe_final["result"]["effect_counts"]["cancellation"] == 1
             assert safe_final["result"]["final_state"]["status"] == "cancelled"
             assert safe["observations"][0]["tool"] == "get_order"
+            # A self-hosted restart must retain terminal evidence and allow the
+            # control plane to read it before more work is admitted.
+            api.terminate()
+            await asyncio.wait_for(api.wait(), timeout=10)
+            api = await start_api()
+            assert await _until(healthy, timeout=45)
+            code, restarted = call(f"/api/v2/evaluations/{safe_final['run_id']}")
+            assert code == 200
+            restored = next(
+                item
+                for item in restarted["trials"]
+                if item["id"] == safe_final["trial_id"]
+            )
+            assert restored["result"]["verdict"] == "PASS"
             refusal, refusal_final = await run_case("cs-012", "safe", "PASS")
             assert refusal["observations"] == []
             assert refusal_final["result"]["effect_counts"].get("cancellation", 0) == 0

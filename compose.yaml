@@ -14,6 +14,11 @@ services:
       interval: 2s
       timeout: 3s
       retries: 30
+    logging: &bounded_logs
+      driver: local
+      options:
+        max-size: 10m
+        max-file: "7"
   temporal-volume:
     image: temporalio/temporal:1.9.1
     user: "0:0"
@@ -32,6 +37,7 @@ services:
       interval: 2s
       timeout: 5s
       retries: 60
+    logging: *bounded_logs
   temporal-namespace:
     image: temporalio/temporal:1.9.1
     depends_on:
@@ -56,6 +62,7 @@ services:
       BADGER_SPAN_STORE_TTL: 168h
     ports: ["127.0.0.1:${AGENTPROOF_JAEGER_PORT:-16686}:16686", "127.0.0.1:${AGENTPROOF_OTLP_PORT:-4318}:4318"]
     volumes: ["jaeger:/storage"]
+    logging: *bounded_logs
   otel-queue-volume:
     image: postgres:16.14-alpine
     user: "0:0"
@@ -78,6 +85,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 3
+    logging: *bounded_logs
   migrate:
     build: {context: ., dockerfile: Dockerfile.dev, target: api}
     command: ["/api-migrate"]
@@ -92,9 +100,12 @@ services:
       AGENTPROOF_MIGRATIONS_EXTERNAL: "1"
       TEMPORAL_ADDRESS: temporal:7233
       AGENTPROOF_TASK_QUEUE: ${AGENTPROOF_TASK_QUEUE:-agentproof-v1}
+      AGENTPROOF_MODEL_CONFIG_DIR: /agentproof/agents
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
       AGENTPROOF_API_TOKEN: ${AGENTPROOF_API_TOKEN:?Set AGENTPROOF_API_TOKEN to a random local secret}
     ports: ["127.0.0.1:${AGENTPROOF_API_PORT:-8080}:8080"]
+    volumes:
+      - ${AGENTPROOF_AGENT_CONFIG_DIR:-./.local/agents}:/agentproof/agents:ro
     depends_on:
       postgres: {condition: service_healthy}
       migrate: {condition: service_completed_successfully}
@@ -111,15 +122,20 @@ services:
       interval: 2s
       timeout: 5s
       retries: 60
+    logging: *bounded_logs
   worker:
     build: {context: ., dockerfile: Dockerfile.dev, target: worker}
     environment:
       DATABASE_URL: postgresql://agentproof_runtime:agentproof_runtime_local_only@postgres:5432/agentproof
       TEMPORAL_ADDRESS: temporal:7233
       AGENTPROOF_TASK_QUEUE: ${AGENTPROOF_TASK_QUEUE:-agentproof-v1}
+      AGENTPROOF_MODEL_CONFIG_DIR: /agentproof/agents
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+    volumes:
+      - ${AGENTPROOF_AGENT_CONFIG_DIR:-./.local/agents}:/agentproof/agents:ro
     depends_on:
       api: {condition: service_healthy}
+    logging: *bounded_logs
   web:
     build: {context: ., dockerfile: Dockerfile.dev, target: web}
     environment:
@@ -133,6 +149,7 @@ services:
       interval: 2s
       timeout: 5s
       retries: 60
+    logging: *bounded_logs
   verify:
     profiles: [verification]
     build: {context: ., dockerfile: Dockerfile.dev, target: verify}

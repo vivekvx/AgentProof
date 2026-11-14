@@ -60,6 +60,9 @@ type Server struct {
 	Starter     Starter
 	BearerToken string
 	RequireAuth bool
+	// HostedAuth is nil in the self-hosted preview. When set, only verified OIDC
+	// identities may use the control plane; the operator bearer is not accepted.
+	HostedAuth TokenVerifier
 }
 type Run struct {
 	ID        string            `json:"id"`
@@ -99,7 +102,9 @@ func ParseAgent(w http.ResponseWriter, r *http.Request) (string, error) {
 func (s *Server) Routes() http.Handler {
 	r := chi.NewRouter()
 	r.Group(func(api chi.Router) {
-		if s.RequireAuth || s.BearerToken != "" {
+		if s.HostedAuth != nil {
+			api.Use(oidcAuthentication(s.HostedAuth))
+		} else if s.RequireAuth || s.BearerToken != "" {
 			api.Use(bearerAuthentication(s.BearerToken))
 		}
 		api.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
@@ -112,10 +117,13 @@ func (s *Server) Routes() http.Handler {
 			respond(w, 200, map[string]string{"status": "ok"})
 		})
 		s.benchmarkRoutes(api)
+		s.projectRoutes(api)
 		api.Post("/api/v2/external/sessions/{id}", s.createExternalSession)
-		api.Post("/api/v1/runs", s.create)
-		api.Get("/api/v1/runs", s.list)
-		api.Get("/api/v1/runs/{id}", s.inspect)
+		if s.HostedAuth == nil {
+			api.Post("/api/v1/runs", s.create)
+			api.Get("/api/v1/runs", s.list)
+			api.Get("/api/v1/runs/{id}", s.inspect)
+		}
 	})
 	s.externalAgentRoutes(r)
 	return otelhttp.NewHandler(r, "agentproof.api")

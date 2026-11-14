@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/vivekvx/AgentProof/apps/api/internal/server"
 	"github.com/vivekvx/AgentProof/db"
@@ -31,8 +32,13 @@ func run() error {
 	defer stop()
 	listenAddress := env("API_ADDRESS", "127.0.0.1:8080")
 	apiToken := os.Getenv("AGENTPROOF_API_TOKEN")
-	if err := server.ValidateListenSecurity(listenAddress, apiToken); err != nil {
-		return err
+	hostedMode := os.Getenv("AGENTPROOF_AUTH_MODE") == "oidc"
+	if !hostedMode {
+		if err := server.ValidateListenSecurity(listenAddress, apiToken); err != nil {
+			return err
+		}
+	} else if os.Getenv("AGENTPROOF_OIDC_ISSUER") == "" || os.Getenv("AGENTPROOF_OIDC_CLIENT_ID") == "" {
+		return errors.New("OIDC mode requires AGENTPROOF_OIDC_ISSUER and AGENTPROOF_OIDC_CLIENT_ID")
 	}
 	options := []sdktrace.TracerProviderOption{sdktrace.WithResource(resource.NewWithAttributes("", attribute.String("service.name", "agentproof-api")))}
 	if os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT") != "" {
@@ -66,6 +72,14 @@ func run() error {
 	}
 	defer temporal.Close()
 	api := &server.Server{Pool: pool, Starter: server.TemporalStarter{Client: temporal}, BearerToken: apiToken, RequireAuth: true}
+	if hostedMode {
+		issuer, clientID := os.Getenv("AGENTPROOF_OIDC_ISSUER"), os.Getenv("AGENTPROOF_OIDC_CLIENT_ID")
+		verifier, verifyErr := server.NewOIDCVerifier(ctx, issuer, clientID)
+		if verifyErr != nil {
+			return verifyErr
+		}
+		api.HostedAuth = verifier
+	}
 	go api.Dispatch(ctx)
 	go api.DispatchBenchmarks(ctx)
 	go api.ExpireStudies(ctx)

@@ -150,16 +150,18 @@ func (s *Server) publishDataset(ctx context.Context, ref contracts.Reference) er
 	return nil
 }
 func (s *Server) benchmarkRoutes(r chi.Router) {
-	r.Post("/api/v2/studies", s.createStudy)
-	r.Get("/api/v2/studies/{id}", s.inspectStudy)
-	r.Post("/api/v2/studies/{id}/cancel", s.cancelStudy)
 	r.Get("/api/v2/datasets", s.datasets)
 	r.Get("/api/v2/agents", s.agents)
 	r.Post("/api/v2/evaluations", s.createBenchmark)
 	r.Get("/api/v2/evaluations", s.listBenchmarks)
 	r.Get("/api/v2/evaluations/{id}", s.inspectBenchmark)
 	r.Get("/api/v2/trials/{id}", s.inspectTrial)
-	r.Post("/api/v2/comparisons", s.compareBenchmarks)
+	if s.HostedAuth == nil {
+		r.Post("/api/v2/studies", s.createStudy)
+		r.Get("/api/v2/studies/{id}", s.inspectStudy)
+		r.Post("/api/v2/studies/{id}/cancel", s.cancelStudy)
+		r.Post("/api/v2/comparisons", s.compareBenchmarks)
+	}
 }
 func (s *Server) datasets(w http.ResponseWriter, r *http.Request) {
 	result := []any{}
@@ -297,6 +299,19 @@ func decodeBenchmark(w http.ResponseWriter, r *http.Request) (benchmarkRequest, 
 	return input, nil
 }
 func (s *Server) createBenchmark(w http.ResponseWriter, r *http.Request) {
+	var projectID, developerID string
+	if s.HostedAuth != nil {
+		p, ok := s.hostedPrincipal(w, r)
+		if !ok {
+			return
+		}
+		projectID = r.Header.Get("X-AgentProof-Project")
+		if _, err := uuid.Parse(projectID); err != nil {
+			problem(w, 400, "project selector required")
+			return
+		}
+		_ = p // identity is created in the evaluation transaction below.
+	}
 	input, err := decodeBenchmark(w, r)
 	if err != nil {
 		problem(w, 400, "invalid benchmark configuration")
@@ -383,6 +398,21 @@ func (s *Server) createBenchmark(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback(r.Context())
+	if s.HostedAuth != nil {
+		p, _ := principalFrom(r.Context())
+		developerID, err = s.identity(r.Context(), tx, p)
+		if err == nil {
+			err = setDeveloper(r.Context(), tx, developerID)
+		}
+		var allowed bool
+		if err == nil {
+			err = tx.QueryRow(r.Context(), "SELECT EXISTS(SELECT 1 FROM project_memberships WHERE project_id=$1 AND developer_id=$2 AND role IN ('owner','member'))", projectID, developerID).Scan(&allowed)
+		}
+		if err != nil || !allowed {
+			problem(w, http.StatusNotFound, "project not found")
+			return
+		}
+	}
 	encoded, _ := json.Marshal(input)
 	if key != "" {
 		if _, err = tx.Exec(r.Context(), "SELECT pg_advisory_xact_lock(hashtextextended($1,3))", key); err != nil {
@@ -391,7 +421,13 @@ func (s *Server) createBenchmark(w http.ResponseWriter, r *http.Request) {
 		}
 		var oldID string
 		var same bool
-		err = tx.QueryRow(r.Context(), "SELECT evaluation_id,request=$2::jsonb FROM benchmark_requests WHERE key=$1", key, encoded).Scan(&oldID, &same)
+		query := "SELECT evaluation_id,request=$2::jsonb FROM benchmark_requests WHERE key=$1"
+		args := []any{key, encoded}
+		if s.HostedAuth != nil {
+			query = "SELECT r.evaluation_id,r.request=$2::jsonb FROM benchmark_requests r JOIN benchmark_evaluation_projects o ON o.evaluation_id=r.evaluation_id WHERE r.key=$1 AND o.project_id=$3"
+			args = append(args, projectID)
+		}
+		err = tx.QueryRow(r.Context(), query, args...).Scan(&oldID, &same)
 		if err == nil {
 			if !same {
 				problem(w, 409, "Idempotency-Key already used with another configuration")
@@ -404,6 +440,19 @@ func (s *Server) createBenchmark(w http.ResponseWriter, r *http.Request) {
 			problem(w, 503, "cannot inspect request key")
 			return
 		}
+	}
+	if err = localEnvelopeLock(r.Context(), tx); err != nil {
+		problem(w, 503, "local evaluation admission unavailable")
+		return
+	}
+	activeStudy, admissionErr := studyEvaluationActive(r.Context(), tx)
+	if admissionErr != nil {
+		problem(w, 503, "local evaluation admission unavailable")
+		return
+	}
+	if activeStudy {
+		problem(w, 409, "an active study owns the local evaluation envelope")
+		return
 	}
 	id := uuid.New()
 	carrier := propagation.MapCarrier{}
@@ -432,6 +481,12 @@ func (s *Server) createBenchmark(w http.ResponseWriter, r *http.Request) {
 		problem(w, 503, "cannot persist evaluation")
 		return
 	}
+	if s.HostedAuth != nil {
+		if _, err = tx.Exec(r.Context(), "INSERT INTO benchmark_evaluation_projects(evaluation_id,project_id,created_by) VALUES($1,$2,$3)", id.String(), projectID, developerID); err != nil {
+			problem(w, 503, "cannot persist project ownership")
+			return
+		}
+	}
 	for _, raw := range selected {
 		var sc scenarioAsset
 		_ = json.Unmarshal(raw, &sc)
@@ -451,7 +506,11 @@ func (s *Server) createBenchmark(w http.ResponseWriter, r *http.Request) {
 	}
 	if key != "" {
 		if _, err = tx.Exec(r.Context(), "INSERT INTO benchmark_requests VALUES($1,$2,$3)", key, encoded, id.String()); err != nil {
-			problem(w, 503, "cannot persist request key")
+			if s.HostedAuth != nil {
+				problem(w, 409, "Idempotency-Key is already reserved by another project")
+			} else {
+				problem(w, 503, "cannot persist request key")
+			}
 			return
 		}
 	}
@@ -523,6 +582,9 @@ func (s *Server) inspectBenchmark(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if _, _, ok = s.hostedEvaluationAccess(w, r, id, false); !ok {
+		return
+	}
 	out, err := s.benchmark(r.Context(), id)
 	if errors.Is(err, pgx.ErrNoRows) {
 		problem(w, 404, "evaluation not found")
@@ -535,6 +597,53 @@ func (s *Server) inspectBenchmark(w http.ResponseWriter, r *http.Request) {
 	respond(w, 200, out)
 }
 func (s *Server) listBenchmarks(w http.ResponseWriter, r *http.Request) {
+	if s.HostedAuth != nil {
+		p, ok := s.hostedPrincipal(w, r)
+		if !ok {
+			return
+		}
+		projectID := r.Header.Get("X-AgentProof-Project")
+		if _, err := uuid.Parse(projectID); err != nil {
+			problem(w, 400, "project selector required")
+			return
+		}
+		tx, err := s.Pool.Begin(r.Context())
+		if err != nil {
+			problem(w, 503, "database unavailable")
+			return
+		}
+		defer tx.Rollback(r.Context())
+		developer, err := s.identity(r.Context(), tx, p)
+		if err == nil {
+			err = setDeveloper(r.Context(), tx, developer)
+		}
+		if err != nil {
+			problem(w, 503, "cannot verify project authorization")
+			return
+		}
+		rows, err := tx.Query(r.Context(), "SELECT e.id,e.created_at,e.status,e.manifest #- '{dataset,content}' #- '{agent,content}' #- '{evaluator,content}' #- '{tool_schema,content}',e.result FROM benchmark_evaluations e JOIN benchmark_evaluation_projects ownership ON ownership.evaluation_id=e.id WHERE ownership.project_id=$1 ORDER BY e.created_at DESC LIMIT 50", projectID)
+		if err != nil {
+			problem(w, 503, "cannot list evaluations")
+			return
+		}
+		defer rows.Close()
+		out := []benchmarkView{}
+		for rows.Next() {
+			var v benchmarkView
+			if err = rows.Scan(&v.ID, &v.CreatedAt, &v.Status, &v.Manifest, &v.Metrics); err != nil {
+				problem(w, 503, "cannot read evaluation")
+				return
+			}
+			v.Trials = []trialView{}
+			out = append(out, v)
+		}
+		if err = rows.Err(); err != nil {
+			problem(w, 503, "cannot list evaluations")
+			return
+		}
+		respond(w, 200, out)
+		return
+	}
 	rows, err := s.Pool.Query(r.Context(), "SELECT id,created_at,status,manifest #- '{dataset,content}' #- '{agent,content}' #- '{evaluator,content}' #- '{tool_schema,content}',result FROM benchmark_evaluations ORDER BY created_at DESC LIMIT 50")
 	if err != nil {
 		problem(w, 503, "cannot list evaluations")
@@ -561,6 +670,21 @@ func (s *Server) inspectTrial(w http.ResponseWriter, r *http.Request) {
 	id, ok := validUUID(w, r)
 	if !ok {
 		return
+	}
+	if s.HostedAuth != nil {
+		var evaluationID string
+		err := s.Pool.QueryRow(r.Context(), "SELECT evaluation_id FROM benchmark_trials WHERE id=$1", id).Scan(&evaluationID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			problem(w, 404, "trial not found")
+			return
+		}
+		if err != nil {
+			problem(w, 503, "cannot read trial")
+			return
+		}
+		if _, _, ok = s.hostedEvaluationAccess(w, r, evaluationID, false); !ok {
+			return
+		}
 	}
 	var result, scenario json.RawMessage
 	err := s.Pool.QueryRow(r.Context(), "SELECT result,scenario FROM benchmark_trials WHERE id=$1", id).Scan(&result, &scenario)

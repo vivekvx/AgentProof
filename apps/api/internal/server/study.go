@@ -184,6 +184,8 @@ type studySnapshot struct {
 	planID, status                                                       string
 	evaluationIDs                                                        []string
 	total, completed, passed, failed, indeterminate, terminalEvaluations int
+	deadlineReachedAt, cancellationRequestedAt                           *time.Time
+	cancellationRequested, temporalCancellationAccepted                  int
 }
 
 type studyQuery interface {
@@ -195,10 +197,12 @@ func readStudySnapshot(ctx context.Context, q studyQuery, id string) (studySnaps
 	var v studySnapshot
 	var stored string
 	var evaluations int
-	err := q.QueryRow(ctx, `SELECT s.plan_id,s.status,
+	err := q.QueryRow(ctx, `SELECT s.plan_id,s.status,s.deadline_reached_at,s.cancellation_requested_at,
    COALESCE(array_agg(e.evaluation_id::text ORDER BY e.profile_id) FILTER (WHERE e.evaluation_id IS NOT NULL), ARRAY[]::text[]),
    count(e.evaluation_id), count(e.evaluation_id) FILTER (WHERE b.status IN ('completed','cancelled') AND b.result IS NOT NULL),
-   COALESCE(sum(t.total),0), COALESCE(sum(t.completed),0), COALESCE(sum(t.passed),0), COALESCE(sum(t.failed),0), COALESCE(sum(t.indeterminate),0)
+   COALESCE(sum(t.total),0), COALESCE(sum(t.completed),0), COALESCE(sum(t.passed),0), COALESCE(sum(t.failed),0), COALESCE(sum(t.indeterminate),0),
+   (SELECT count(*) FROM benchmark_study_cancellation_delivery d WHERE d.study_id=s.id),
+   (SELECT count(*) FROM benchmark_study_cancellation_delivery d WHERE d.study_id=s.id AND d.temporal_accepted_at IS NOT NULL)
  FROM benchmark_studies s
  LEFT JOIN benchmark_study_evaluations e ON e.study_id=s.id
  LEFT JOIN benchmark_evaluations b ON b.id=e.evaluation_id
@@ -207,7 +211,7 @@ func readStudySnapshot(ctx context.Context, q studyQuery, id string) (studySnaps
    count(*) FILTER (WHERE result->>'verdict'='FAIL') AS failed,
    count(*) FILTER (WHERE result->>'verdict'='INDETERMINATE') AS indeterminate
    FROM benchmark_trials WHERE evaluation_id=e.evaluation_id) t ON true
- WHERE s.id=$1 GROUP BY s.id`, id).Scan(&v.planID, &stored, &v.evaluationIDs, &evaluations, &v.terminalEvaluations, &v.total, &v.completed, &v.passed, &v.failed, &v.indeterminate)
+ WHERE s.id=$1 GROUP BY s.id`, id).Scan(&v.planID, &stored, &v.deadlineReachedAt, &v.cancellationRequestedAt, &v.evaluationIDs, &evaluations, &v.terminalEvaluations, &v.total, &v.completed, &v.passed, &v.failed, &v.indeterminate, &v.cancellationRequested, &v.temporalCancellationAccepted)
 	v.status = stored
 	sort.Strings(v.evaluationIDs)
 	if stored == "running" && evaluations == 2 && v.total == 8 && v.completed == 8 && v.terminalEvaluations == 2 {
@@ -254,9 +258,8 @@ func (s *Server) createStudy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback(r.Context())
-	// Serialize admissions across API instances. The lock is held through commit,
-	// so a simultaneous request sees the committed study before admitting one.
-	if _, err = tx.Exec(r.Context(), "SELECT pg_advisory_xact_lock(hashtextextended('agentproof:active-study',11))"); err != nil {
+	// Serialize all local workload admissions across API instances.
+	if err = localEnvelopeLock(r.Context(), tx); err != nil {
 		problem(w, 503, "study admission unavailable")
 		return
 	}
@@ -288,26 +291,23 @@ func (s *Server) createStudy(w http.ResponseWriter, r *http.Request) {
 		problem(w, 400, "study plan identity differs")
 		return
 	}
-	var active bool
-	err = tx.QueryRow(r.Context(), `SELECT EXISTS (
-		SELECT 1 FROM benchmark_studies s
-		WHERE (
-			(SELECT count(*) FROM benchmark_study_evaluations e WHERE e.study_id=s.id) <> 2
-			OR EXISTS (SELECT 1 FROM benchmark_study_evaluations e
-				JOIN benchmark_evaluations b ON b.id=e.evaluation_id
-				WHERE e.study_id=s.id AND b.result IS NULL)
-			OR (SELECT count(*) FROM benchmark_study_trials t WHERE t.study_id=s.id::text) <> 8
-			OR EXISTS (SELECT 1 FROM benchmark_study_trials st
-				JOIN benchmark_trials t ON t.id=st.trial_id
-				WHERE st.study_id=s.id::text AND t.result IS NULL)
-		)
-	)`).Scan(&active)
+	active, admissionErr := studyEvaluationActive(r.Context(), tx)
+	err = admissionErr
 	if err != nil {
 		problem(w, 503, "study lookup failed")
 		return
 	}
 	if active {
 		problem(w, 409, "another study is active")
+		return
+	}
+	genericActive, admissionErr := genericEvaluationActive(r.Context(), tx)
+	if admissionErr != nil {
+		problem(w, 503, "study admission unavailable")
+		return
+	}
+	if genericActive {
+		problem(w, 409, "an ordinary evaluation owns the local study envelope")
 		return
 	}
 	studyID := uuid.New()
@@ -402,7 +402,8 @@ func (s *Server) inspectStudy(w http.ResponseWriter, r *http.Request) {
 		problem(w, 503, "study unavailable")
 		return
 	}
-	respond(w, 200, map[string]any{"id": id.String(), "plan_id": snapshot.planID, "status": snapshot.status, "planned_slots": 8, "completed_trials": snapshot.completed, "pass": snapshot.passed, "fail": snapshot.failed, "indeterminate": snapshot.indeterminate, "pending": 8 - snapshot.completed, "pending_evaluations": 2 - snapshot.terminalEvaluations, "evaluation_ids": snapshot.evaluationIDs})
+	childrenTerminal := snapshot.total == 8 && snapshot.completed == 8 && snapshot.terminalEvaluations == 2
+	respond(w, 200, map[string]any{"id": id.String(), "plan_id": snapshot.planID, "status": snapshot.status, "planned_slots": 8, "completed_trials": snapshot.completed, "pass": snapshot.passed, "fail": snapshot.failed, "indeterminate": snapshot.indeterminate, "pending": 8 - snapshot.completed, "pending_evaluations": 2 - snapshot.terminalEvaluations, "evaluation_ids": snapshot.evaluationIDs, "cancellation": map[string]any{"deadline_reached_at": snapshot.deadlineReachedAt, "cancellation_requested_at": snapshot.cancellationRequestedAt, "temporal_requests": snapshot.cancellationRequested, "temporal_requests_accepted": snapshot.temporalCancellationAccepted, "temporal_cancellation_acknowledged": snapshot.cancellationRequested > 0 && snapshot.cancellationRequested == snapshot.temporalCancellationAccepted, "child_workflows_terminal": childrenTerminal, "study_terminal": childrenTerminal}})
 }
 
 func (s *Server) cancelStudy(w http.ResponseWriter, r *http.Request) {
@@ -445,7 +446,7 @@ func (s *Server) cancelStudy(w http.ResponseWriter, r *http.Request) {
 		problem(w, 409, "study is not running")
 		return
 	}
-	if _, err = tx.Exec(r.Context(), "UPDATE benchmark_studies SET status='cancelled' WHERE id=$1", id.String()); err != nil {
+	if _, err = tx.Exec(r.Context(), "UPDATE benchmark_studies SET status='cancelled',cancellation_requested_at=COALESCE(cancellation_requested_at,clock_timestamp()) WHERE id=$1", id.String()); err != nil {
 		problem(w, 503, "study cancellation failed")
 		return
 	}
@@ -463,12 +464,21 @@ func (s *Server) signalStudyCancellation(ctx context.Context, id string) {
 		for rows.Next() {
 			var evaluationID string
 			if rows.Scan(&evaluationID) == nil {
+				_, _ = s.Pool.Exec(ctx, `INSERT INTO benchmark_study_cancellation_delivery(study_id,evaluation_id)
+					VALUES($1,$2) ON CONFLICT(study_id,evaluation_id) DO NOTHING`, id, evaluationID)
 				if canceler, ok := s.Starter.(interface {
 					CancelBenchmark(context.Context, string) error
 				}); ok {
 					ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-					_ = canceler.CancelBenchmark(ctx, evaluationID)
+					err := canceler.CancelBenchmark(ctx, evaluationID)
 					cancel()
+					if err == nil {
+						_, _ = s.Pool.Exec(context.Background(), "UPDATE benchmark_study_cancellation_delivery SET temporal_accepted_at=clock_timestamp(),error_class=NULL WHERE study_id=$1 AND evaluation_id=$2", id, evaluationID)
+					} else {
+						_, _ = s.Pool.Exec(context.Background(), "UPDATE benchmark_study_cancellation_delivery SET error_class=$3 WHERE study_id=$1 AND evaluation_id=$2", id, evaluationID, fmt.Sprintf("%T", err))
+					}
+				} else {
+					_, _ = s.Pool.Exec(ctx, "UPDATE benchmark_study_cancellation_delivery SET error_class='starter_unavailable' WHERE study_id=$1 AND evaluation_id=$2", id, evaluationID)
 				}
 			}
 		}
@@ -480,7 +490,9 @@ func (s *Server) signalStudyCancellation(ctx context.Context, id string) {
 // Provider admission also checks this deadline in the shared budget row.
 // Finalization may finish later and remains the worker's responsibility.
 func (s *Server) expireStudiesOnce(ctx context.Context) error {
-	_, err := s.Pool.Exec(ctx, `UPDATE benchmark_studies s SET status='cancelled'
+	_, err := s.Pool.Exec(ctx, `UPDATE benchmark_studies s SET status='cancelled',
+		deadline_reached_at=COALESCE(s.deadline_reached_at,clock_timestamp()),
+		cancellation_requested_at=COALESCE(s.cancellation_requested_at,clock_timestamp())
 		WHERE s.status='running' AND s.created_at <= clock_timestamp()-interval '180 seconds'
 		AND EXISTS (SELECT 1 FROM benchmark_study_evaluations e
 			JOIN benchmark_evaluations b ON b.id=e.evaluation_id
